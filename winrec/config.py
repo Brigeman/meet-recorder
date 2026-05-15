@@ -91,9 +91,7 @@ def save_config(config: dict) -> None:
         json.dump(config, f, indent=2)
 
 
-def setup_logging() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        handlers=[logging.StreamHandler()],
-    )
+def setup_logging(role: str = "app") -> str:
+    from winrec.logging_util import setup_process_logging
+
+    return setup_process_logging(role)

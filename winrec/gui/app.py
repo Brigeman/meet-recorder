@@ -11,7 +11,8 @@ import uuid
 import customtkinter as ctk
 import pystray
 
-from winrec.config import APP_NAME, load_config, save_config, setup_logging
+from winrec.config import APP_NAME, load_config, save_config
+from winrec.logging_util import log_event, setup_process_logging
 from winrec.gui.cooldown import CooldownManager
 from winrec.gui.icons import make_icon, make_ico
 from winrec.gui.panel import FloatingPanel
@@ -20,8 +21,6 @@ from winrec.gui.settings import SettingsWindow
 from winrec.gui.theme import STATE_COLORS
 from winrec.ipc.single_instance import acquire_single_instance
 from winrec.ipc.supervisor import ProcessSupervisor
-from winrec.logging_util import log_event
-
 log = logging.getLogger(__name__)
 
 ctk.set_appearance_mode("dark")
@@ -60,6 +59,7 @@ class WinRecApp(ctk.CTk):
         self._pending_candidate: dict | None = None
         self._prompt_visible = False
         self._last_context: str = ""
+        self._last_level_ts = 0.0
 
         self._cooldown = CooldownManager(
             self._cfg.get("dismiss_cooldown_seconds", 90),
@@ -84,7 +84,7 @@ class WinRecApp(ctk.CTk):
         self._recorder_sup.start()
         self._detector_sup.start()
         self._create_tray()
-        log_event("app_start")
+        log_event("app_start", recordings_dir=self._cfg.get("recordings_dir"))
 
     def _create_tray(self):
         menu = pystray.Menu(
@@ -117,17 +117,33 @@ class WinRecApp(ctk.CTk):
     def _handle_detector_event(self, obj: dict):
         etype = obj.get("type")
         if etype == "call_candidate":
-            if self._recording or self._prompt_visible:
-                return
             ctx = obj.get("context_key", "")
+            app = obj.get("app", "Unknown")
+            score = obj.get("score")
+            matched = obj.get("matched", [])
+            if self._recording:
+                log.info("prompt_skipped reason=already_recording app=%s score=%s", app, score)
+                return
+            if self._prompt_visible:
+                log.info("prompt_skipped reason=prompt_already_visible app=%s", app)
+                return
             if not self._cooldown.can_prompt(ctx):
+                log.info("prompt_skipped reason=cooldown context_key=%s app=%s", ctx, app)
                 return
             self._pending_candidate = obj
             self._prompt_visible = True
-            log_event("prompt_shown", app=obj.get("app"), score=obj.get("score"))
-            self._prompt.show_for_candidate(obj.get("app", "Unknown"))
+            log_event("prompt_shown", app=app, score=score, matched=matched, context_key=ctx)
+            self._prompt.show_for_candidate(app)
+        elif etype == "no_call":
+            log.debug(
+                "detector_no_call score=%s matched=%s",
+                obj.get("score"),
+                obj.get("matched"),
+            )
+        elif etype == "error":
+            log.error("detector_error message=%s", obj.get("message"))
         elif etype == "heartbeat":
-            pass
+            log.info("detector_heartbeat")
 
     def _on_recorder_line(self, obj: dict):
         self.after(0, self._handle_recorder_event, obj)
@@ -135,6 +151,12 @@ class WinRecApp(ctk.CTk):
     def _handle_recorder_event(self, obj: dict):
         etype = obj.get("type")
         if etype == "level":
+            if not self._recording or not self._panel.is_visible:
+                return
+            now = time.time()
+            if now - self._last_level_ts < 0.12:
+                return
+            self._last_level_ts = now
             self._panel.set_peak(float(obj.get("peak", 0)))
         elif etype == "recording_started":
             self._recording = True
@@ -234,7 +256,8 @@ class WinRecApp(ctk.CTk):
 
 
 def run_gui() -> int:
-    setup_logging()
+    log_path = setup_process_logging("gui")
+    logging.getLogger(__name__).info("gui_log_file=%s", log_path)
     if not acquire_single_instance():
         log_event("single_instance_duplicate")
         log.warning("Another instance is already running")

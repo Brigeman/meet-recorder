@@ -71,6 +71,19 @@ Artifacts: zip on GitHub Releases containing **three exe in one folder**:
 
 Unpack the zip, keep all three files together, double-click `WinRec.exe`.
 
+## Logs
+
+All processes write daily logs under your recordings folder:
+
+```text
+{recordings_dir}/logs/
+  winrec-gui-2026-05-15.log
+  winrec-detector-2026-05-15.log
+  winrec-recorder-2026-05-15.log
+```
+
+Use **detector** log to see `detector_tick` (score, matched signals, sustain) and `prompt_skipped` in **gui** log when a notification was blocked.
+
 ### First release checklist
 
 1. Create a GitHub repository and push the code (this folder is not a git repo until you run `git init`).
