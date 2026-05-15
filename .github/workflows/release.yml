@@ -34,7 +34,7 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
       - name: Build executables
-        run: pyinstaller build/winrec.spec --noconfirm
+        run: pyinstaller build/winrec.spec --noconfirm --log-level INFO
       - name: List build output
         run: dir dist
       - name: Create archive
