@@ -11,19 +11,13 @@ from pycaw.constants import CLSID_MMDeviceEnumerator
 from pycaw.pycaw import IAudioSessionControl2, IAudioSessionManager2, IMMDeviceEnumerator
 
 from winrec.config import BROWSER_PROCESSES, load_config
-from winrec.detector.apps import match_title_hint
+from winrec.detector.scoring import match_title_hint
 
 log = logging.getLogger(__name__)
 
 _user32 = ctypes.windll.user32
 _WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
 _UNSAFE_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
-
-MEETING_URL_HINTS = re.compile(
-    r"(google meet|meet\.google|zoom\.us|teams\.microsoft|slack\.com|discord\.com)",
-    re.IGNORECASE,
-)
-
 
 def _get_window_title(pid: int) -> str:
     titles = []
@@ -63,16 +57,6 @@ def _browser_display_name(exe: str) -> str:
         "opera.exe": "Opera",
     }
     return mapping.get(exe, exe.replace(".exe", "").capitalize())
-
-
-def _is_meeting_context(title: str) -> bool:
-    if match_title_hint(title):
-        return True
-    if MEETING_URL_HINTS.search(title):
-        return True
-    lower = title.lower()
-    meeting_words = ("meet", "huddle", "zoom meeting", "call with", "встреча")
-    return any(w in lower for w in meeting_words)
 
 
 def get_browser_mic_sessions() -> list[dict]:
@@ -116,15 +100,16 @@ def get_browser_mic_sessions() -> list[dict]:
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 pass
         title = _prettify_title(raw_title)
-        if _is_meeting_context(title):
-            active.append(
-                {
-                    "process": name,
-                    "pid": pid,
-                    "tab": title,
-                    "app": _browser_display_name(name),
-                }
-            )
+        # Any active browser mic session counts; title hints only refine the label.
+        app_name = match_title_hint(title) or _browser_display_name(name)
+        active.append(
+            {
+                "process": name,
+                "pid": pid,
+                "tab": title,
+                "app": app_name,
+            }
+        )
     return active
 
 

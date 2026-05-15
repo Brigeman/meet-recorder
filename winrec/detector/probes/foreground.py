@@ -1,7 +1,8 @@
 import ctypes
 from ctypes import wintypes
 
-from winrec.detector.apps import match_title_hint, resolve_app_for_pid
+from winrec.detector.apps import resolve_app_for_pid
+from winrec.detector.scoring import match_title_hint
 
 _user32 = ctypes.windll.user32
 
