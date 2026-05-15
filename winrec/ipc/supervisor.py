@@ -1,4 +1,5 @@
 import logging
+import os
 import subprocess
 import sys
 import threading
@@ -80,7 +81,9 @@ class ProcessSupervisor:
             self._stop.wait(self._restart_cooldown)
 
     def _spawn(self) -> None:
-        log.info("Starting %s: %s", self._name, " ".join(self._args))
+        log.info("subprocess_start name=%s cmd=%s", self._name, " ".join(self._args))
+        env = os.environ.copy()
+        env["PYTHONUNBUFFERED"] = "1"
         self._proc = subprocess.Popen(
             self._args,
             stdin=subprocess.PIPE,
@@ -89,6 +92,7 @@ class ProcessSupervisor:
             text=True,
             bufsize=1,
             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+            env=env,
         )
         threading.Thread(target=self._drain_stderr, daemon=True, name=f"{self._name}-err").start()
 
@@ -98,7 +102,7 @@ class ProcessSupervisor:
         for line in self._proc.stderr:
             line = line.strip()
             if line:
-                log.debug("%s stderr: %s", self._name, line)
+                log.warning("%s stderr: %s", self._name, line)
 
     def _read_stdout(self) -> None:
         assert self._proc and self._proc.stdout

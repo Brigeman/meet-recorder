@@ -17,7 +17,15 @@ from winrec.gui.theme import (
 class GlassWindow(ctk.CTkToplevel):
     """Borderless topmost window with capsule/card chrome."""
 
-    def __init__(self, master, width: int, height: int, corner_radius: int = 16):
+    def __init__(
+        self,
+        master,
+        width: int,
+        height: int,
+        corner_radius: int = 16,
+        *,
+        use_alpha: bool = True,
+    ):
         super().__init__(master)
         self._width = width
         self._height = height
@@ -28,10 +36,11 @@ class GlassWindow(ctk.CTkToplevel):
         self.withdraw()
         self.overrideredirect(True)
         self.attributes("-topmost", True)
-        try:
-            self.attributes("-alpha", GLASS_ALPHA)
-        except tk.TclError:
-            pass
+        if use_alpha:
+            try:
+                self.attributes("-alpha", GLASS_ALPHA)
+            except tk.TclError:
+                pass
         self.configure(fg_color=GLASS_SHADOW)
         self.geometry(f"{width}x{height}")
 

@@ -6,12 +6,14 @@ import threading
 import time
 import uuid
 
-from winrec.config import load_config, setup_logging
+from winrec.config import load_config
 from winrec.ipc.protocol import iter_jsonl, write_jsonl_line
-from winrec.logging_util import log_event
+from winrec.logging_util import log_event, setup_process_logging
 from winrec.recorder.capture import AudioCapture
 
 log = logging.getLogger(__name__)
+
+LEVEL_INTERVAL_SEC = 0.15
 
 
 class RecorderService:
@@ -23,7 +25,8 @@ class RecorderService:
         self._running = True
 
     def run(self) -> None:
-        setup_logging()
+        log_path = setup_process_logging("recorder")
+        log.info("recorder_log_file=%s", log_path)
         log_event("recorder_started")
         write_jsonl_line({"type": "recorder_ready", "timestamp": time.time()})
 
@@ -42,7 +45,7 @@ class RecorderService:
                 write_jsonl_line(
                     {"type": "level", "peak": round(self._capture.peak, 4), "timestamp": time.time()}
                 )
-            time.sleep(0.07)
+            time.sleep(LEVEL_INTERVAL_SEC)
 
     def _emit_level(self, peak: float) -> None:
         pass

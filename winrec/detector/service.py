@@ -7,7 +7,8 @@ import time
 
 import comtypes
 
-from winrec.config import POLL_INTERVAL, load_config, setup_logging
+from winrec.config import POLL_INTERVAL, load_config
+from winrec.logging_util import log_event, setup_process_logging
 from winrec.detector.probes import (
     probe_audio_activity,
     probe_browser_meeting,
@@ -24,8 +25,6 @@ from winrec.detector.scoring import (
     primary_app,
 )
 from winrec.ipc.protocol import write_jsonl_line
-from winrec.logging_util import log_event
-
 log = logging.getLogger(__name__)
 
 
@@ -54,17 +53,25 @@ def collect_snapshot() -> SignalSnapshot:
 
 
 def run_detector() -> None:
-    setup_logging()
+    log_path = setup_process_logging("detector")
+    log.info("detector_log_file=%s", log_path)
     comtypes.CoInitializeEx(comtypes.COINIT_MULTITHREADED)
     cfg = load_config()
     threshold = cfg.get("prompt_threshold", 70)
+    web_sustain = cfg.get("web_sustain_seconds", 2.5)
+    desktop_sustain = cfg.get("desktop_sustain_seconds", 7.0)
     tracker = SustainTracker(
         threshold=threshold,
-        web_sustain=cfg.get("web_sustain_seconds", 2.5),
-        desktop_sustain=cfg.get("desktop_sustain_seconds", 7.0),
+        web_sustain=web_sustain,
+        desktop_sustain=desktop_sustain,
     )
     trace = os.environ.get("WINREC_DETECTOR_TRACE", "").strip() == "1"
-    log_event("detector_started")
+    log_event(
+        "detector_started",
+        threshold=threshold,
+        web_sustain=web_sustain,
+        desktop_sustain=desktop_sustain,
+    )
     write_jsonl_line({"type": "heartbeat", "timestamp": time.time()})
 
     while True:
@@ -75,6 +82,20 @@ def run_detector() -> None:
             sustained, sustain_elapsed = tracker.update(score, snap)
             app = primary_app(snap)
             ctx = context_key(snap)
+
+            required_sustain = web_sustain if snap.browser_meeting else desktop_sustain
+            log.info(
+                "detector_tick score=%s threshold=%s sustained=%s sustain=%.1f/%.1f "
+                "app=%s matched=%s context_key=%s",
+                score,
+                threshold,
+                sustained,
+                sustain_elapsed,
+                required_sustain,
+                app,
+                ",".join(matched) or "-",
+                ctx,
+            )
 
             if trace:
                 log.info(
