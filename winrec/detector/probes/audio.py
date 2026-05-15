@@ -6,12 +6,14 @@ import psutil
 from comtypes import CLSCTX_ALL, CoCreateInstance
 from pycaw.constants import CLSID_MMDeviceEnumerator
 from pycaw.pycaw import (
-    AudioSessionState,
     IAudioMeterInformation,
     IAudioSessionControl2,
     IAudioSessionManager2,
     IMMDeviceEnumerator,
 )
+
+# WASAPI AudioSessionStateActive — use int for pycaw builds without AudioSessionState enum.
+SESSION_ACTIVE = 1
 
 from winrec.config import BROWSER_PROCESSES
 from winrec.detector.apps import PROCESS_TO_APP, WEBVIEW2, webview2_has_valid_ancestor
@@ -48,7 +50,7 @@ def _probe_capture_sessions(enumerator) -> bool:
 
     for i in range(session_enum.GetCount()):
         ctl = session_enum.GetSession(i)
-        if ctl.GetState() != AudioSessionState.Active:
+        if ctl.GetState() != SESSION_ACTIVE:
             continue
         try:
             ctl2 = ctl.QueryInterface(IAudioSessionControl2)
@@ -79,7 +81,7 @@ def _session_peak(session_ctl) -> float:
         meter = session_ctl.QueryInterface(IAudioMeterInformation)
         return meter.GetPeakValue()
     except Exception:
-        return 1.0 if session_ctl.GetState() == AudioSessionState.Active else 0.0
+        return 1.0 if session_ctl.GetState() == SESSION_ACTIVE else 0.0
 
 
 def mic_used_by_meeting_process() -> bool:
@@ -97,7 +99,7 @@ def mic_used_by_meeting_process() -> bool:
 
     for i in range(session_enum.GetCount()):
         ctl = session_enum.GetSession(i)
-        if ctl.GetState() != AudioSessionState.Active:
+        if ctl.GetState() != SESSION_ACTIVE:
             continue
         try:
             ctl2 = ctl.QueryInterface(IAudioSessionControl2)

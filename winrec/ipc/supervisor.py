@@ -102,7 +102,8 @@ class ProcessSupervisor:
         for line in self._proc.stderr:
             line = line.strip()
             if line:
-                log.warning("%s stderr: %s", self._name, line)
+                level = log.error if "Error" in line or "Traceback" in line else log.warning
+                level("%s stderr: %s", self._name, line)
 
     def _read_stdout(self) -> None:
         assert self._proc and self._proc.stdout
