@@ -6,7 +6,12 @@ dist/
 *.ico
 .claude/
 
-# PyInstaller
+# PyInstaller (keep winrec.spec only)
+build/winrec/
+build/**/*.toc
+build/**/*.pkg
 build/**/localpycs/
 build/**/warn-*.txt
 build/**/xref-*.html
+build/**/PYZ-*.pyz
+build/**/base_library.zip
