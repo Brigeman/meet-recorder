@@ -5,7 +5,9 @@ import os
 import sys
 import time
 
-import comtypes
+from winrec.com_init import ensure_com
+
+ensure_com()
 
 from winrec.config import POLL_INTERVAL, load_config
 from winrec.logging_util import log_event, setup_process_logging
@@ -55,7 +57,6 @@ def collect_snapshot() -> SignalSnapshot:
 def run_detector() -> None:
     log_path = setup_process_logging("detector")
     log.info("detector_log_file=%s", log_path)
-    comtypes.CoInitializeEx(comtypes.COINIT_MULTITHREADED)
     cfg = load_config()
     threshold = cfg.get("prompt_threshold", 70)
     web_sustain = cfg.get("web_sustain_seconds", 2.5)
