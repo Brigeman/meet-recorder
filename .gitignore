@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+dist/
+*.ico
+.claude/
+
+# PyInstaller
+build/**/localpycs/
+build/**/warn-*.txt
+build/**/xref-*.html

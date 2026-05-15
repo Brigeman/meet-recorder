@@ -1,0 +1,15 @@
+[project]
+name = "desktop-meeting-recorder"
+version = "1.0.0"
+description = "Desktop Meeting Recorder — prompt-before-record for Windows calls"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

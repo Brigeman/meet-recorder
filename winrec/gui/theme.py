@@ -1,0 +1,35 @@
+STATE_COLORS = {
+    "idle": "#555555",
+    "monitoring": "#2ecc71",
+    "recording": "#e74c3c",
+}
+
+BG_DARK = "#111111"
+BG_CARD = "#1c1c1e"
+BG_CARD_ELEVATED = "#232326"
+BG_CONTROL = "#2c2c2e"
+BG_CONTROL_HOVER = "#3a3a3c"
+BG_INPUT = "#161618"
+TEXT_PRIMARY = "#f0f0f0"
+TEXT_SECONDARY = "#707075"
+TEXT_MUTED = "#909095"
+TOAST_DURATION = 3000
+PAD = 14
+
+# Glassmorphism
+GLASS_BG = "#1a1a1e"
+GLASS_BORDER = "#2a2a30"
+GLASS_SHADOW = "#0a0a0c"
+GLASS_ALPHA = 0.94
+ACCENT_REC = "#e74c3c"
+BTN_QUIET = "#2c2c2e"
+BTN_QUIET_HOVER = "#3a3a3c"
+BTN_PRIMARY = "#3d5afe"
+BTN_PRIMARY_HOVER = "#536dfe"
+BTN_STOP = "#c0392b"
+BTN_STOP_HOVER = "#e74c3c"
+
+PROMPT_W = 320
+PROMPT_H = 92
+PANEL_W = 360
+PANEL_H = 48
