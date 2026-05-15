@@ -4,7 +4,8 @@ from pathlib import Path
 from PyInstaller.utils.hooks import collect_submodules
 
 block_cipher = None
-root = Path(SPECPATH).parent.parent
+# SPECPATH is the build/ directory; parent is the repository root.
+root = Path(SPECPATH).parent
 winrec_hidden = collect_submodules("winrec")
 
 a_gui = Analysis(
@@ -48,7 +49,7 @@ exe_gui = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,
