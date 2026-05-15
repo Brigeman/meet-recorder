@@ -1,0 +1,48 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dev dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Run tests
+        run: pytest -q
+
+  build-windows:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pyinstaller
+      - name: Build executables
+        run: pyinstaller build/winrec.spec --noconfirm
+      - name: List build output
+        run: dir dist
+      - name: Create archive
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist/WinRec* -DestinationPath "DesktopMeetingRecorder-${{ github.ref_name }}-win64.zip"
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: DesktopMeetingRecorder-${{ github.ref_name }}-win64.zip
+          generate_release_notes: true
