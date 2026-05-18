@@ -32,6 +32,8 @@ DEFAULTS = {
     "audio_format": "wav",
     "filename_prefix": "meeting",
     "notifications": True,
+    "start_with_windows": True,
+    "first_run_completed": False,
     "supported_apps": {
         "teams": True,
         "zoom": True,

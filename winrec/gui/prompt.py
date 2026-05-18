@@ -3,6 +3,7 @@
 import customtkinter as ctk
 
 from winrec.gui.app_icons import icon_for_app
+from winrec.gui.icons import load_logo_image
 from winrec.gui.glass import GlassWindow, label
 from winrec.gui.theme import (
     BTN_PRIMARY,
@@ -10,9 +11,12 @@ from winrec.gui.theme import (
     BTN_QUIET,
     BTN_QUIET_HOVER,
     GLASS_ALPHA,
+    PAD,
     PROMPT_H,
     PROMPT_W,
+    TEXT_PRIMARY,
     TEXT_MUTED,
+    TEXT_SECONDARY,
 )
 
 PROMPT_TITLE = "Похоже, идет звонок"
@@ -29,20 +33,30 @@ class MeetingPrompt(GlassWindow):
 
     def _build(self):
         c = self.content
-        c.grid_columnconfigure(1, weight=1)
+        c.grid_columnconfigure(2, weight=1)
         c.grid_rowconfigure(1, weight=1)
 
+        self._watermark_img = ctk.CTkImage(
+            light_image=load_logo_image(28),
+            dark_image=load_logo_image(28),
+            size=(28, 28),
+        )
+        self._watermark = ctk.CTkLabel(c, text="", image=self._watermark_img, width=28)
+        self._watermark.grid(row=0, column=0, sticky="nw", padx=(PAD, 6), pady=(PAD, 0))
+
         self._icon = ctk.CTkLabel(c, text="", width=40)
-        self._icon.grid(row=0, column=0, rowspan=2, sticky="nw", padx=(14, 10), pady=(14, 0))
+        self._icon.grid(row=0, column=1, rowspan=2, sticky="nw", padx=(0, 10), pady=(14, 0))
 
         self._title = label(c, PROMPT_TITLE, bold=True, font_size=14)
-        self._title.grid(row=0, column=1, sticky="sw", padx=(0, 14), pady=(14, 0))
+        self._title.configure(text_color=TEXT_PRIMARY)
+        self._title.grid(row=0, column=2, sticky="sw", padx=(0, 14), pady=(14, 0))
 
         self._subtitle = label(c, "", muted=True, font_size=11)
-        self._subtitle.grid(row=1, column=1, sticky="nw", padx=(0, 14), pady=(2, 0))
+        self._subtitle.configure(text_color=TEXT_SECONDARY)
+        self._subtitle.grid(row=1, column=2, sticky="nw", padx=(0, 14), pady=(2, 0))
 
         btn_row = ctk.CTkFrame(c, fg_color="transparent")
-        btn_row.grid(row=2, column=0, columnspan=2, sticky="e", padx=12, pady=(10, 12))
+        btn_row.grid(row=2, column=0, columnspan=3, sticky="e", padx=12, pady=(10, 12))
 
         ctk.CTkButton(
             btn_row,
@@ -53,7 +67,7 @@ class MeetingPrompt(GlassWindow):
             fg_color=BTN_QUIET,
             hover_color=BTN_QUIET_HOVER,
             text_color=TEXT_MUTED,
-            corner_radius=16,
+            corner_radius=18,
             command=self._dismiss,
         ).pack(side="left", padx=(0, 6))
 
@@ -65,7 +79,7 @@ class MeetingPrompt(GlassWindow):
             font=("Segoe UI Semibold", 10),
             fg_color=BTN_PRIMARY,
             hover_color=BTN_PRIMARY_HOVER,
-            corner_radius=16,
+            corner_radius=18,
             command=self._record,
         ).pack(side="left")
 

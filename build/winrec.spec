@@ -12,7 +12,11 @@ a_gui = Analysis(
     [str(root / "winrec" / "__main__.py")],
     pathex=[str(root)],
     binaries=[],
-    datas=[(str(root / "winrec" / "resources" / "icons" / "*.png"), "winrec/resources/icons")],
+    datas=[
+        (str(root / "winrec" / "resources" / "icons" / "*.png"), "winrec/resources/icons"),
+        (str(root / "winrec" / "resources" / "logo.png"), "winrec/resources"),
+        (str(root / "winrec" / "resources" / "winrec.ico"), "winrec/resources"),
+    ],
     hiddenimports=winrec_hidden
     + [
         "pyaudiowpatch",
@@ -53,6 +57,7 @@ exe_gui = EXE(
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,
+    icon=str(root / "winrec" / "resources" / "winrec.ico"),
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

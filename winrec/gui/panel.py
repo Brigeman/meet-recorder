@@ -4,10 +4,11 @@ import time
 
 import customtkinter as ctk
 
+from winrec.gui.icons import load_logo_image
 from winrec.gui.glass import GlassWindow
 from winrec.gui.theme import (
     ACCENT_REC,
-    ACCENT_REC_GLOW,
+    ACCENT_REC_HOVER,
     BTN_PRIMARY,
     BTN_PRIMARY_HOVER,
     BTN_STOP,
@@ -32,8 +33,7 @@ class FloatingPanel(GlassWindow):
         self._start_ts: float | None = None
         self._timer_job = None
         self._pulse_job = None
-        self._pulse_idx = 0
-        self._pulse_colors = [ACCENT_REC, ACCENT_REC_GLOW, ACCENT_REC]
+        self._pulse_phase = 0.0
         self._build()
 
     @property
@@ -46,8 +46,16 @@ class FloatingPanel(GlassWindow):
         c.grid_columnconfigure(2, weight=1)
         c.grid_rowconfigure(0, weight=1)
 
+        self._logo_img = ctk.CTkImage(
+            light_image=load_logo_image(14),
+            dark_image=load_logo_image(14),
+            size=(14, 14),
+        )
+        self._logo = ctk.CTkLabel(c, text="", image=self._logo_img, width=14)
+        self._logo.grid(row=0, column=0, padx=(14, 0), pady=21, sticky="n")
+
         self._rec_dot = ctk.CTkFrame(c, width=10, height=10, corner_radius=5, fg_color=STATE_COLORS["idle"])
-        self._rec_dot.grid(row=0, column=0, padx=(16, 10), pady=23)
+        self._rec_dot.grid(row=0, column=0, padx=(16, 10), pady=30, sticky="s")
 
         self._timer = ctk.CTkLabel(
             c,
@@ -64,12 +72,12 @@ class FloatingPanel(GlassWindow):
         self._action_btn = ctk.CTkButton(
             c,
             text="Start",
-            width=72,
+            width=78,
             height=32,
             font=("Segoe UI Semibold", 10),
             fg_color=BTN_PRIMARY,
             hover_color=BTN_PRIMARY_HOVER,
-            corner_radius=16,
+            corner_radius=18,
             command=self._action,
         )
         self._action_btn.grid(row=0, column=3, padx=(10, 14))
@@ -131,12 +139,33 @@ class FloatingPanel(GlassWindow):
     def _tick_pulse(self):
         if not self._recording or not self._visible:
             return
-        self._pulse_idx = (self._pulse_idx + 1) % len(self._pulse_colors)
-        self._rec_dot.configure(fg_color=self._pulse_colors[self._pulse_idx])
-        self._pulse_job = self.after(400, self._tick_pulse)
+        self._pulse_phase = (self._pulse_phase + 0.2) % 1.0
+        if self._pulse_phase < 0.5:
+            color = _blend_hex(ACCENT_REC, ACCENT_REC_HOVER, self._pulse_phase * 2.0)
+        else:
+            color = _blend_hex(ACCENT_REC_HOVER, ACCENT_REC, (self._pulse_phase - 0.5) * 2.0)
+        self._rec_dot.configure(fg_color=color)
+        self._pulse_job = self.after(160, self._tick_pulse)
 
     def _cancel_pulse(self):
         if self._pulse_job:
             self.after_cancel(self._pulse_job)
             self._pulse_job = None
-        self._pulse_idx = 0
+        self._pulse_phase = 0.0
+
+
+def _blend_hex(c1: str, c2: str, t: float) -> str:
+    t = max(0.0, min(1.0, t))
+    r1, g1, b1 = _hex_to_rgb(c1)
+    r2, g2, b2 = _hex_to_rgb(c2)
+    r = int(r1 + (r2 - r1) * t)
+    g = int(g1 + (g2 - g1) * t)
+    b = int(b1 + (b2 - b1) * t)
+    return f"#{r:02X}{g:02X}{b:02X}"
+
+
+def _hex_to_rgb(color: str) -> tuple[int, int, int]:
+    value = color.lstrip("#")
+    if len(value) != 6:
+        return (0, 0, 0)
+    return int(value[0:2], 16), int(value[2:4], 16), int(value[4:6], 16)
