@@ -39,15 +39,39 @@ class SignalSnapshot:
     meeting_network_count: int = 0
 
 
-def compute_matched(snapshot: SignalSnapshot) -> list[str]:
+def _allow_meeting_audio_signal(
+    snapshot: SignalSnapshot,
+    streak: float,
+    threshold: float,
+) -> bool:
+    if snapshot.in_call_title_app:
+        return True
+    return streak >= threshold
+
+
+def compute_matched(
+    snapshot: SignalSnapshot,
+    *,
+    cap_streak: float = 0.0,
+    ren_streak: float = 0.0,
+    audio_streak_threshold: float = 8.0,
+) -> list[str]:
     matched = []
     if snapshot.mic_active:
         matched.append("mic_active")
     if snapshot.loopback_active:
         matched.append("loopback_active")
-    if snapshot.meeting_capture_active:
+    if snapshot.meeting_capture_active and _allow_meeting_audio_signal(
+        snapshot,
+        cap_streak,
+        audio_streak_threshold,
+    ):
         matched.append("meeting_app_capture_active")
-    if snapshot.meeting_render_active:
+    if snapshot.meeting_render_active and _allow_meeting_audio_signal(
+        snapshot,
+        ren_streak,
+        audio_streak_threshold,
+    ):
         matched.append("meeting_app_render_active")
     if snapshot.meeting_network_active:
         matched.append("meeting_app_network_active")
@@ -64,15 +88,29 @@ def compute_matched(snapshot: SignalSnapshot) -> list[str]:
     return matched
 
 
-def compute_score(snapshot: SignalSnapshot) -> int:
+def compute_score(
+    snapshot: SignalSnapshot,
+    *,
+    cap_streak: float = 0.0,
+    ren_streak: float = 0.0,
+    audio_streak_threshold: float = 8.0,
+) -> int:
     score = 0
     if snapshot.mic_active:
         score += WEIGHTS["mic_active"]
     if snapshot.loopback_active:
         score += WEIGHTS["loopback_active"]
-    if snapshot.meeting_capture_active:
+    if snapshot.meeting_capture_active and _allow_meeting_audio_signal(
+        snapshot,
+        cap_streak,
+        audio_streak_threshold,
+    ):
         score += WEIGHTS["meeting_app_capture_active"]
-    if snapshot.meeting_render_active:
+    if snapshot.meeting_render_active and _allow_meeting_audio_signal(
+        snapshot,
+        ren_streak,
+        audio_streak_threshold,
+    ):
         score += WEIGHTS["meeting_app_render_active"]
     if snapshot.meeting_network_active:
         score += WEIGHTS["meeting_app_network_active"]
@@ -117,6 +155,31 @@ def match_title_hint(title: str) -> str | None:
 
 def is_web_context(snapshot: SignalSnapshot) -> bool:
     return snapshot.browser_meeting
+
+
+@dataclass
+class AudioStreakTracker:
+    threshold_seconds: float = 8.0
+    _capture_since: float | None = None
+    _render_since: float | None = None
+
+    def update(self, snapshot: SignalSnapshot) -> tuple[float, float]:
+        now = time.time()
+        if snapshot.meeting_capture_active:
+            if self._capture_since is None:
+                self._capture_since = now
+        else:
+            self._capture_since = None
+
+        if snapshot.meeting_render_active:
+            if self._render_since is None:
+                self._render_since = now
+        else:
+            self._render_since = None
+
+        cap_streak = (now - self._capture_since) if self._capture_since is not None else 0.0
+        ren_streak = (now - self._render_since) if self._render_since is not None else 0.0
+        return cap_streak, ren_streak
 
 
 @dataclass

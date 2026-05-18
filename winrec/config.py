@@ -24,6 +24,7 @@ DEFAULTS = {
     "web_sustain_seconds": 2.5,
     "desktop_sustain_seconds": 7.0,
     "desktop_strong_sustain_seconds": 4.0,
+    "audio_streak_seconds_for_call": 8.0,
     "dismiss_cooldown_seconds": 90,
     "post_stop_cooldown_seconds": 120,
     "enable_network_probe": True,

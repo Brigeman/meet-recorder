@@ -59,6 +59,7 @@ class WinRecApp(ctk.CTk):
         self._pending_candidate: dict | None = None
         self._prompt_visible = False
         self._last_context: str = ""
+        self._last_app: str = ""
         self._last_level_ts = 0.0
 
         self._cooldown = CooldownManager(
@@ -159,7 +160,7 @@ class WinRecApp(ctk.CTk):
             if self._prompt_visible:
                 log.info("prompt_skipped reason=prompt_already_visible app=%s", app)
                 return
-            if not self._cooldown.can_prompt(ctx):
+            if not self._cooldown.can_prompt(ctx, app=app):
                 log.info("prompt_skipped reason=cooldown context_key=%s app=%s", ctx, app)
                 return
             self._pending_candidate = obj
@@ -200,7 +201,7 @@ class WinRecApp(ctk.CTk):
             self._recording = False
             self._panel.hide_panel()
             if self._last_context:
-                self._cooldown.record_post_stop(self._last_context)
+                self._cooldown.record_post_stop(self._last_context, app=self._last_app or None)
             self._update_tray_icon()
             log_event("recording_stopped", file_path=obj.get("file_path"))
         elif etype == "recording_failed":
@@ -213,7 +214,7 @@ class WinRecApp(ctk.CTk):
         self._prompt_visible = False
         if self._pending_candidate:
             ctx = self._pending_candidate.get("context_key", app)
-            self._cooldown.record_dismiss(ctx)
+            self._cooldown.record_dismiss(ctx, app=app)
             log_event("prompt_dismissed", app=app)
         self._pending_candidate = None
 
@@ -221,6 +222,7 @@ class WinRecApp(ctk.CTk):
         self._prompt_visible = False
         cand = self._pending_candidate or {}
         self._last_context = cand.get("context_key", app)
+        self._last_app = app
         self._pending_candidate = None
         self._start_recording(app, cand.get("matched", []))
 
