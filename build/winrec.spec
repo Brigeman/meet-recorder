@@ -12,7 +12,7 @@ a_gui = Analysis(
     [str(root / "winrec" / "__main__.py")],
     pathex=[str(root)],
     binaries=[],
-    datas=[],
+    datas=[(str(root / "winrec" / "resources" / "icons" / "*.png"), "winrec/resources/icons")],
     hiddenimports=winrec_hidden
     + [
         "pyaudiowpatch",
