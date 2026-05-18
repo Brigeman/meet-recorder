@@ -5,8 +5,11 @@ from tkinter import filedialog
 
 import customtkinter as ctk
 
+from winrec import autostart
 from winrec.config import AUDIO_FORMATS, save_config
 from winrec.gui.theme import (
+    ACCENT_PRIMARY,
+    ACCENT_PRIMARY_HOVER,
     BG_CARD,
     BG_CONTROL,
     BG_CONTROL_HOVER,
@@ -24,7 +27,7 @@ class SettingsWindow(ctk.CTkToplevel):
         self._cfg = dict(config)
         self._on_save = on_save
         self.title("Settings")
-        self.geometry("380x280")
+        self.geometry("420x350")
         self.resizable(False, False)
         self.configure(fg_color=BG_DARK)
         self._build()
@@ -89,9 +92,26 @@ class SettingsWindow(ctk.CTkToplevel):
             card, textvariable=self._desktop_sustain_var, height=28, width=60, fg_color=BG_INPUT
         ).grid(row=5, column=1, padx=(0, 12), pady=6, sticky="w")
 
+        self._autostart_var = ctk.BooleanVar(value=self._cfg.get("start_with_windows", True))
+        ctk.CTkLabel(
+            card, text="Start with Windows", font=("Segoe UI", 11), text_color=TEXT_SECONDARY
+        ).grid(row=6, column=0, padx=14, pady=(8, 6), sticky="w")
+        ctk.CTkSwitch(
+            card,
+            text="Enable",
+            variable=self._autostart_var,
+            onvalue=True,
+            offvalue=False,
+            fg_color=ACCENT_PRIMARY,
+            progress_color=ACCENT_PRIMARY,
+            button_color=TEXT_PRIMARY,
+            button_hover_color=TEXT_SECONDARY,
+            text_color=TEXT_PRIMARY,
+        ).grid(row=6, column=1, padx=(0, 12), pady=(8, 6), sticky="w")
+
         ctk.CTkButton(
             self, text="Save", command=self._save,
-            fg_color=BG_CONTROL, hover_color=BG_CONTROL_HOVER,
+            fg_color=ACCENT_PRIMARY, hover_color=ACCENT_PRIMARY_HOVER,
         ).grid(row=1, column=0, pady=(0, PAD))
 
     def _pick_folder(self):
@@ -109,6 +129,11 @@ class SettingsWindow(ctk.CTkToplevel):
         self._cfg["recordings_dir"] = self._path_var.get()
         self._cfg["audio_format"] = self._format_var.get()
         self._cfg["filename_prefix"] = self._prefix_var.get().strip()
+        self._cfg["start_with_windows"] = bool(self._autostart_var.get())
         save_config(self._cfg)
+        if self._cfg["start_with_windows"]:
+            autostart.enable(autostart.current_executable_path())
+        else:
+            autostart.disable()
         self._on_save(self._cfg)
         self.destroy()

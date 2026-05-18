@@ -11,16 +11,16 @@ import uuid
 import customtkinter as ctk
 import pystray
 
+from winrec import autostart
 from winrec.config import APP_NAME, load_config, save_config
-from winrec.logging_util import log_event, setup_process_logging
 from winrec.gui.cooldown import CooldownManager
-from winrec.gui.icons import make_icon, make_ico
+from winrec.gui.icons import app_ico_path, make_tray_icon
 from winrec.gui.panel import FloatingPanel
 from winrec.gui.prompt import MeetingPrompt
 from winrec.gui.settings import SettingsWindow
-from winrec.gui.theme import STATE_COLORS
 from winrec.ipc.single_instance import acquire_single_instance
 from winrec.ipc.supervisor import ProcessSupervisor
+from winrec.logging_util import log_event, setup_process_logging
 log = logging.getLogger(__name__)
 
 ctk.set_appearance_mode("dark")
@@ -84,6 +84,7 @@ class WinRecApp(ctk.CTk):
         self._recorder_sup.start()
         self._detector_sup.start()
         self._create_tray()
+        self._apply_autostart_policy()
         log_event("app_start", recordings_dir=self._cfg.get("recordings_dir"))
 
     def _create_tray(self):
@@ -100,7 +101,7 @@ class WinRecApp(ctk.CTk):
         )
         self._tray_icon = pystray.Icon(
             APP_NAME,
-            make_icon(STATE_COLORS[self._state]),
+            make_tray_icon(self._state),
             APP_NAME,
             menu,
         )
@@ -108,8 +109,39 @@ class WinRecApp(ctk.CTk):
 
     def _update_tray_icon(self):
         if self._tray_icon:
-            color = STATE_COLORS["recording"] if self._recording else STATE_COLORS["monitoring"]
-            self._tray_icon.icon = make_icon(color)
+            state = "recording" if self._recording else "monitoring"
+            self._tray_icon.icon = make_tray_icon(state)
+
+    def _apply_autostart_policy(self):
+        if not autostart.is_supported():
+            return
+        desired = self._cfg.get("start_with_windows", True)
+        first_run = not self._cfg.get("first_run_completed", False)
+
+        if first_run and desired:
+            if autostart.enable(autostart.current_executable_path()):
+                log_event("autostart_enabled_first_run")
+            self._cfg["first_run_completed"] = True
+            save_config(self._cfg)
+            self._notify_first_run()
+            return
+
+        if desired and not autostart.is_enabled():
+            autostart.enable(autostart.current_executable_path())
+            return
+        if not desired and autostart.is_enabled():
+            autostart.disable()
+
+    def _notify_first_run(self):
+        if not self._tray_icon:
+            return
+        try:
+            self._tray_icon.notify(
+                "Desktop Meeting Recorder работает в трее",
+                "Готов записывать звонки",
+            )
+        except Exception:
+            pass
 
     def _on_detector_line(self, obj: dict):
         self.after(0, self._handle_detector_event, obj)
@@ -232,6 +264,7 @@ class WinRecApp(ctk.CTk):
 
     def _on_config_saved(self, cfg: dict):
         self._cfg = cfg
+        self._apply_autostart_policy()
         self._cooldown = CooldownManager(
             cfg.get("dismiss_cooldown_seconds", 90),
             cfg.get("post_stop_cooldown_seconds", 120),
@@ -266,7 +299,7 @@ def run_gui() -> int:
     try:
         app = WinRecApp()
         try:
-            app.iconbitmap(make_ico(STATE_COLORS["monitoring"]))
+            app.iconbitmap(app_ico_path())
         except Exception:
             pass
         app.run()
