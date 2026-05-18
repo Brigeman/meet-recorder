@@ -21,6 +21,7 @@ from winrec.detector.probes import (
 )
 from winrec.detector.probes.audio import probe_meeting_app_audio
 from winrec.detector.scoring import (
+    AudioStreakTracker,
     SignalSnapshot,
     SustainTracker,
     compute_matched,
@@ -50,8 +51,8 @@ def collect_snapshot(enable_network_probe: bool = True) -> SignalSnapshot:
     title_hint = None if in_call else match_title_hint(title)
 
     snap = SignalSnapshot(
-        mic_active=mic_peak_active or app_cap_active,
-        loopback_active=loopback_peak_active or app_ren_active,
+        mic_active=mic_peak_active,
+        loopback_active=loopback_peak_active,
         meeting_capture_active=app_cap_active,
         meeting_render_active=app_ren_active,
         meeting_network_active=net_active,
@@ -82,12 +83,14 @@ def run_detector() -> None:
     web_sustain = cfg.get("web_sustain_seconds", 2.5)
     desktop_sustain = cfg.get("desktop_sustain_seconds", 7.0)
     desktop_strong_sustain = cfg.get("desktop_strong_sustain_seconds", 4.0)
+    audio_streak_threshold = cfg.get("audio_streak_seconds_for_call", 8.0)
     tracker = SustainTracker(
         threshold=threshold,
         web_sustain=web_sustain,
         desktop_sustain=desktop_sustain,
         desktop_strong_sustain=desktop_strong_sustain,
     )
+    audio_streak_tracker = AudioStreakTracker(threshold_seconds=audio_streak_threshold)
     trace = os.environ.get("WINREC_DETECTOR_TRACE", "").strip() == "1"
     log_event(
         "detector_started",
@@ -95,14 +98,26 @@ def run_detector() -> None:
         web_sustain=web_sustain,
         desktop_sustain=desktop_sustain,
         desktop_strong_sustain=desktop_strong_sustain,
+        audio_streak_threshold=audio_streak_threshold,
     )
     write_jsonl_line({"type": "heartbeat", "timestamp": time.time()})
 
     while True:
         try:
             snap = collect_snapshot(enable_network_probe=cfg.get("enable_network_probe", True))
-            matched = compute_matched(snap)
-            score = compute_score(snap)
+            cap_streak, ren_streak = audio_streak_tracker.update(snap)
+            matched = compute_matched(
+                snap,
+                cap_streak=cap_streak,
+                ren_streak=ren_streak,
+                audio_streak_threshold=audio_streak_threshold,
+            )
+            score = compute_score(
+                snap,
+                cap_streak=cap_streak,
+                ren_streak=ren_streak,
+                audio_streak_threshold=audio_streak_threshold,
+            )
             sustained, sustain_elapsed = tracker.update(score, snap)
             app = primary_app(snap)
             ctx = context_key(snap)
@@ -110,7 +125,8 @@ def run_detector() -> None:
             required_sustain = tracker.required_for(snap)
             log.info(
                 "detector_tick score=%s threshold=%s sustained=%s sustain=%.1f/%.1f "
-                "app=%s in_call=%s net=%s(%s) audio_app=cap:%s/ren:%s peaks=%.3f/%.3f "
+                "app=%s in_call=%s net=%s(%s) audio_app=cap:%s/ren:%s streak=%.1f/%.1f "
+                "peaks=%.3f/%.3f "
                 "matched=%s context_key=%s",
                 score,
                 threshold,
@@ -123,6 +139,8 @@ def run_detector() -> None:
                 snap.meeting_network_count,
                 snap.meeting_capture_active,
                 snap.meeting_render_active,
+                cap_streak,
+                ren_streak,
                 getattr(snap, "_debug_cap_peak", 0.0),
                 getattr(snap, "_debug_ren_peak", 0.0),
                 ",".join(matched) or "-",
