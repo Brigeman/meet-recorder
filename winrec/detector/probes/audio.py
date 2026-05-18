@@ -39,6 +39,30 @@ def probe_audio_activity() -> tuple[bool, bool]:
         return mic, loopback
 
 
+def probe_meeting_app_audio(meeting_pids: set[int]) -> tuple[bool, bool, float, float]:
+    """Per-process meeting audio sessions on capture/render endpoints."""
+    if not meeting_pids:
+        return False, False, 0.0, 0.0
+    try:
+        enumerator = CoCreateInstance(
+            CLSID_MMDeviceEnumerator, IMMDeviceEnumerator, CLSCTX_ALL
+        )
+        cap_active, cap_peak = _probe_endpoint_sessions(
+            enumerator=enumerator,
+            flow=1,
+            meeting_pids=meeting_pids,
+        )
+        ren_active, ren_peak = _probe_endpoint_sessions(
+            enumerator=enumerator,
+            flow=0,
+            meeting_pids=meeting_pids,
+        )
+        return cap_active, ren_active, cap_peak, ren_peak
+    except Exception as e:
+        log.debug("meeting app audio probe failed: %s", e)
+        return False, False, 0.0, 0.0
+
+
 def _probe_capture_sessions(enumerator) -> bool:
     try:
         mic_device = enumerator.GetDefaultAudioEndpoint(1, 0)
@@ -63,6 +87,32 @@ def _probe_capture_sessions(enumerator) -> bool:
         except Exception:
             continue
     return False
+
+
+def _probe_endpoint_sessions(enumerator, flow: int, meeting_pids: set[int]) -> tuple[bool, float]:
+    try:
+        device = enumerator.GetDefaultAudioEndpoint(flow, 0)
+        raw = device.Activate(IAudioSessionManager2._iid_, CLSCTX_ALL, None)
+        mgr = raw.QueryInterface(IAudioSessionManager2)
+        session_enum = mgr.GetSessionEnumerator()
+    except Exception:
+        return False, 0.0
+
+    active = False
+    peak = 0.0
+    for i in range(session_enum.GetCount()):
+        ctl = session_enum.GetSession(i)
+        try:
+            ctl2 = ctl.QueryInterface(IAudioSessionControl2)
+            pid = ctl2.GetProcessId()
+        except Exception:
+            continue
+        if pid == 0 or pid not in meeting_pids:
+            continue
+        if ctl.GetState() == SESSION_ACTIVE:
+            active = True
+        peak = max(peak, _session_peak(ctl))
+    return active, peak
 
 
 def _probe_render_peak(enumerator) -> bool:

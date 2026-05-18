@@ -1,5 +1,7 @@
 """Known meeting applications and WebView2 ancestry rules."""
 
+import re
+
 import psutil
 
 PROCESS_TO_APP: dict[str, str] = {
@@ -39,6 +41,20 @@ TITLE_HINTS: list[tuple[str, str]] = [
     (r"Teams", "Microsoft Teams"),
 ]
 
+IN_CALL_TITLE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (
+        re.compile(r"(?:\d{1,2}:){1,2}\d{2}\s*\|\s*Microsoft Teams", re.IGNORECASE),
+        "Microsoft Teams",
+    ),
+    (
+        re.compile(r"(Calling|Meeting in|In call|Incoming call).*Microsoft Teams", re.IGNORECASE),
+        "Microsoft Teams",
+    ),
+    (re.compile(r"Zoom Meeting", re.IGNORECASE), "Zoom"),
+    (re.compile(r"Huddle\b.*Slack", re.IGNORECASE), "Slack"),
+    (re.compile(r"\b(Voice connected|Speaking)\b.*Discord", re.IGNORECASE), "Discord"),
+]
+
 
 def resolve_process_name(pid: int) -> str | None:
     try:
@@ -57,6 +73,24 @@ def resolve_app_for_pid(pid: int) -> str | None:
             return PROCESS_TO_APP.get(parent_name or "", "Microsoft Teams")
         return None
     return PROCESS_TO_APP.get(name)
+
+
+def match_title_hint(title: str) -> str | None:
+    if not title:
+        return None
+    for pattern, app in TITLE_HINTS:
+        if re.search(pattern, title, re.IGNORECASE):
+            return app
+    return None
+
+
+def match_in_call_title(title: str) -> tuple[str | None, bool]:
+    if not title:
+        return None, False
+    for pattern, app in IN_CALL_TITLE_PATTERNS:
+        if pattern.search(title):
+            return app, True
+    return None, False
 
 
 def _get_parent_process_name(pid: int) -> str | None:
@@ -101,3 +135,24 @@ def list_running_meeting_apps() -> set[str]:
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
     return apps
+
+
+def list_running_meeting_pids() -> dict[str, list[int]]:
+    by_app: dict[str, list[int]] = {}
+    for proc in psutil.process_iter(["name", "pid"]):
+        try:
+            name = (proc.info.get("name") or "").lower()
+            pid = proc.info.get("pid")
+            if not pid:
+                continue
+            app: str | None = None
+            if name in PROCESS_TO_APP:
+                app = PROCESS_TO_APP[name]
+            elif name == WEBVIEW2 and webview2_has_valid_ancestor(pid):
+                parent = _get_parent_process_name(pid)
+                app = PROCESS_TO_APP.get(parent or "", "Microsoft Teams")
+            if app:
+                by_app.setdefault(app, []).append(pid)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return by_app

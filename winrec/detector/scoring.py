@@ -1,20 +1,22 @@
 """Scoring engine with sustain timing."""
 
 import hashlib
-import re
 import time
 from dataclasses import dataclass, field
 
-from winrec.detector.apps import TITLE_HINTS
+from winrec.detector.apps import match_title_hint as apps_match_title_hint
 
 WEIGHTS = {
-    "mic_active": 35,
-    "loopback_active": 25,
-    "known_meeting_app_running": 15,
-    "known_meeting_app_foreground": 20,
-    "title_hint": 15,
+    "mic_active": 25,
+    "loopback_active": 20,
+    "meeting_app_capture_active": 30,
+    "meeting_app_render_active": 20,
+    "meeting_app_network_active": 25,
+    "in_call_title": 25,
+    "known_meeting_app_running": 10,
+    "known_meeting_app_foreground": 15,
+    "title_hint": 10,
     "browser_meeting_context": 40,
-    "uia_strong_call_controls": 35,
 }
 
 
@@ -25,11 +27,16 @@ class SignalSnapshot:
     apps_running: set[str] = field(default_factory=set)
     foreground_app: str | None = None
     title_hint_app: str | None = None
+    in_call_title_app: str | None = None
     browser_meeting: bool = False
     browser_app: str | None = None
     browser_tab: str = ""
     browser_pid: int = 0
     window_title: str = ""
+    meeting_capture_active: bool = False
+    meeting_render_active: bool = False
+    meeting_network_active: bool = False
+    meeting_network_count: int = 0
 
 
 def compute_matched(snapshot: SignalSnapshot) -> list[str]:
@@ -38,11 +45,19 @@ def compute_matched(snapshot: SignalSnapshot) -> list[str]:
         matched.append("mic_active")
     if snapshot.loopback_active:
         matched.append("loopback_active")
+    if snapshot.meeting_capture_active:
+        matched.append("meeting_app_capture_active")
+    if snapshot.meeting_render_active:
+        matched.append("meeting_app_render_active")
+    if snapshot.meeting_network_active:
+        matched.append("meeting_app_network_active")
     if snapshot.apps_running:
         matched.append("known_meeting_app_running")
     if snapshot.foreground_app:
         matched.append("known_meeting_app_foreground")
-    if snapshot.title_hint_app:
+    if snapshot.in_call_title_app:
+        matched.append("in_call_title")
+    elif snapshot.title_hint_app:
         matched.append("title_hint")
     if snapshot.browser_meeting:
         matched.append("browser_meeting_context")
@@ -55,11 +70,19 @@ def compute_score(snapshot: SignalSnapshot) -> int:
         score += WEIGHTS["mic_active"]
     if snapshot.loopback_active:
         score += WEIGHTS["loopback_active"]
+    if snapshot.meeting_capture_active:
+        score += WEIGHTS["meeting_app_capture_active"]
+    if snapshot.meeting_render_active:
+        score += WEIGHTS["meeting_app_render_active"]
+    if snapshot.meeting_network_active:
+        score += WEIGHTS["meeting_app_network_active"]
     if snapshot.apps_running:
         score += WEIGHTS["known_meeting_app_running"]
     if snapshot.foreground_app:
         score += WEIGHTS["known_meeting_app_foreground"]
-    if snapshot.title_hint_app:
+    if snapshot.in_call_title_app:
+        score += WEIGHTS["in_call_title"]
+    elif snapshot.title_hint_app:
         score += WEIGHTS["title_hint"]
     if snapshot.browser_meeting:
         score += WEIGHTS["browser_meeting_context"]
@@ -71,6 +94,8 @@ def primary_app(snapshot: SignalSnapshot) -> str:
         return snapshot.browser_app
     if snapshot.foreground_app:
         return snapshot.foreground_app
+    if snapshot.in_call_title_app:
+        return snapshot.in_call_title_app
     if snapshot.title_hint_app:
         return snapshot.title_hint_app
     if snapshot.apps_running:
@@ -87,12 +112,7 @@ def context_key(snapshot: SignalSnapshot) -> str:
 
 
 def match_title_hint(title: str) -> str | None:
-    if not title:
-        return None
-    for pattern, app in TITLE_HINTS:
-        if re.search(pattern, title, re.IGNORECASE):
-            return app
-    return None
+    return apps_match_title_hint(title)
 
 
 def is_web_context(snapshot: SignalSnapshot) -> bool:
@@ -104,15 +124,24 @@ class SustainTracker:
     threshold: int = 70
     web_sustain: float = 2.5
     desktop_sustain: float = 7.0
+    desktop_strong_sustain: float = 4.0
     _since: float | None = None
     _last_key: str | None = None
+
+    def required_for(self, snapshot: SignalSnapshot) -> float:
+        strong_desktop = snapshot.meeting_capture_active or snapshot.meeting_network_active
+        if is_web_context(snapshot):
+            return self.web_sustain
+        if strong_desktop:
+            return self.desktop_strong_sustain
+        return self.desktop_sustain
 
     def update(
         self, score: int, snapshot: SignalSnapshot
     ) -> tuple[bool, float]:
         """Return (sustained_ready, sustain_elapsed)."""
         key = context_key(snapshot)
-        required = self.web_sustain if is_web_context(snapshot) else self.desktop_sustain
+        required = self.required_for(snapshot)
         now = time.time()
 
         if score < self.threshold:
