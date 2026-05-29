@@ -12,12 +12,15 @@ import customtkinter as ctk
 import pystray
 
 from winrec import autostart
+from winrec.calls.queue import enqueue_upload
+from winrec.calls.worker import CallsUploadWorker
 from winrec.config import APP_NAME, load_config, save_config
 from winrec.gui.cooldown import CooldownManager
 from winrec.gui.icons import app_ico_path, make_tray_icon
 from winrec.gui.panel import FloatingPanel
 from winrec.gui.prompt import MeetingPrompt
 from winrec.gui.settings import SettingsWindow
+from winrec.gui.setup_wizard import SetupWizard
 from winrec.ipc.single_instance import acquire_single_instance
 from winrec.ipc.supervisor import ProcessSupervisor
 from winrec.logging_util import log_event, setup_process_logging
@@ -84,8 +87,14 @@ class WinRecApp(ctk.CTk):
 
         self._recorder_sup.start()
         self._detector_sup.start()
+        self._upload_worker = CallsUploadWorker(
+            get_config=lambda: self._cfg,
+            on_upload_result=self._on_upload_result,
+        )
+        self._upload_worker.start()
         self._create_tray()
         self._apply_autostart_policy()
+        self._maybe_show_setup_wizard()
         log_event("app_start", recordings_dir=self._cfg.get("recordings_dir"))
 
     def _create_tray(self):
@@ -112,6 +121,61 @@ class WinRecApp(ctk.CTk):
         if self._tray_icon:
             state = "recording" if self._recording else "monitoring"
             self._tray_icon.icon = make_tray_icon(state)
+
+    def _notify_tray(self, title: str, message: str) -> None:
+        if not self._tray_icon:
+            return
+        try:
+            self._tray_icon.notify(title, message)
+        except Exception:
+            pass
+
+    def _maybe_show_setup_wizard(self) -> None:
+        if self._cfg.get("calls_setup_completed"):
+            return
+        if self._cfg.get("calls_setup_skipped"):
+            return
+
+        def _open():
+            SetupWizard(self, self._cfg, self._on_setup_complete)
+
+        self.after(500, _open)
+
+    def _on_setup_complete(self, cfg: dict) -> None:
+        self._cfg = cfg
+        if cfg.get("calls_setup_completed"):
+            self._notify_tray("Calls подключён", "Записи будут загружаться автоматически")
+            log_event("calls_setup_completed")
+
+    def _on_upload_result(self, job_id: str, success: bool, error: str | None) -> None:
+        def _notify():
+            if success:
+                self._notify_tray("Загрузка завершена", "Звонок отправлен в Calls")
+                log_event("upload_success", job_id=job_id)
+            else:
+                self._notify_tray("Ошибка загрузки", "Не удалось отправить запись в Calls")
+                log_event("upload_failed", job_id=job_id, error=error)
+
+        self.after(0, _notify)
+
+    def _enqueue_upload(self, metadata: dict, file_path: str | None) -> None:
+        audio_path = (metadata or {}).get("audio_file") or file_path
+        if not audio_path or not os.path.isfile(audio_path):
+            log.warning("upload_skipped reason=missing_audio")
+            return
+        try:
+            enqueue_upload(
+                audio_path=audio_path,
+                metadata=metadata or {},
+                project_id=self._cfg.get("calls_default_project_id"),
+                api_base=self._cfg.get("calls_api_base_url", "https://calls.o2consult.ai"),
+            )
+            self._notify_tray("Загрузка", "Отправка записи в Calls…")
+            self._upload_worker.enqueue_now()
+            log_event("upload_enqueued", audio_path=audio_path)
+        except Exception as exc:
+            log.error("upload_enqueue_failed: %s", exc)
+            self._notify_tray("Ошибка загрузки", "Не удалось поставить запись в очередь")
 
     def _apply_autostart_policy(self):
         if not autostart.is_supported():
@@ -203,7 +267,15 @@ class WinRecApp(ctk.CTk):
             if self._last_context:
                 self._cooldown.record_post_stop(self._last_context, app=self._last_app or None)
             self._update_tray_icon()
-            log_event("recording_stopped", file_path=obj.get("file_path"))
+            metadata = obj.get("metadata") or {}
+            file_path = obj.get("file_path")
+            log_event("recording_stopped", file_path=file_path)
+            if (
+                self._cfg.get("calls_setup_completed")
+                and self._cfg.get("calls_auto_upload")
+                and self._cfg.get("calls_device_token")
+            ):
+                self._enqueue_upload(metadata, file_path)
         elif etype == "recording_failed":
             log.error("recording_failed: %s", obj.get("message"))
             self._recording = False
@@ -275,6 +347,7 @@ class WinRecApp(ctk.CTk):
 
     def _tray_quit(self, icon=None, item=None):
         log_event("app_exit")
+        self._upload_worker.stop()
         self._detector_sup.stop()
         self._recorder_sup.send_stdin({"command": "shutdown"})
         self._recorder_sup.stop()
@@ -286,6 +359,7 @@ class WinRecApp(ctk.CTk):
         try:
             self.mainloop()
         finally:
+            self._upload_worker.stop()
             self._detector_sup.stop()
             self._recorder_sup.stop()
 

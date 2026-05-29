@@ -35,6 +35,13 @@ DEFAULTS = {
     "notifications": True,
     "start_with_windows": True,
     "first_run_completed": False,
+    "calls_setup_completed": False,
+    "calls_setup_skipped": False,
+    "calls_api_base_url": "https://calls.o2consult.ai",
+    "calls_device_token": "",
+    "calls_device_id": "",
+    "calls_default_project_id": None,
+    "calls_auto_upload": True,
     "supported_apps": {
         "teams": True,
         "zoom": True,
