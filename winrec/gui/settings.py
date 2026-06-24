@@ -22,12 +22,13 @@ from winrec.gui.theme import (
 
 
 class SettingsWindow(ctk.CTkToplevel):
-    def __init__(self, master, config: dict, on_save):
+    def __init__(self, master, config: dict, on_save, on_reset_pairing=None):
         super().__init__(master)
         self._cfg = dict(config)
         self._on_save = on_save
+        self._on_reset_pairing = on_reset_pairing
         self.title("Settings")
-        self.geometry("420x390")
+        self.geometry("420x430")
         self.resizable(False, False)
         self.configure(fg_color=BG_DARK)
         self._build()
@@ -109,27 +110,39 @@ class SettingsWindow(ctk.CTkToplevel):
             text_color=TEXT_PRIMARY,
         ).grid(row=6, column=1, padx=(0, 12), pady=(8, 6), sticky="w")
 
-        self._dual_track_var = ctk.BooleanVar(
-            value=bool(self._cfg.get("dual_track_recording", False))
-        )
         ctk.CTkLabel(
             card,
-            text="Dual track (L=remote, R=mic)",
+            text="Calls",
             font=("Segoe UI", 11),
             text_color=TEXT_SECONDARY,
-        ).grid(row=7, column=0, padx=14, pady=(0, 6), sticky="w")
-        ctk.CTkSwitch(
-            card,
-            text="Enable",
-            variable=self._dual_track_var,
-            onvalue=True,
-            offvalue=False,
-            fg_color=ACCENT_PRIMARY,
-            progress_color=ACCENT_PRIMARY,
-            button_color=TEXT_PRIMARY,
-            button_hover_color=TEXT_SECONDARY,
+        ).grid(row=7, column=0, padx=14, pady=(8, 6), sticky="w")
+        calls_frame = ctk.CTkFrame(card, fg_color="transparent")
+        calls_frame.grid(row=7, column=1, padx=(0, 12), pady=(8, 6), sticky="ew")
+        calls_frame.grid_columnconfigure(0, weight=1)
+
+        if self._cfg.get("calls_setup_completed") and self._cfg.get("calls_device_token"):
+            status = "ПК уже привязан к Calls"
+        elif self._cfg.get("calls_setup_skipped"):
+            status = "Calls не подключён"
+        else:
+            status = "Calls не подключён"
+        ctk.CTkLabel(
+            calls_frame,
+            text=status,
+            font=("Segoe UI", 10),
             text_color=TEXT_PRIMARY,
-        ).grid(row=7, column=1, padx=(0, 12), pady=(0, 6), sticky="w")
+            anchor="w",
+        ).grid(row=0, column=0, sticky="w")
+        if self._on_reset_pairing:
+            ctk.CTkButton(
+                calls_frame,
+                text="Сбросить / переподключить",
+                command=self._reset_pairing,
+                height=28,
+                fg_color=BG_CONTROL,
+                hover_color=BG_CONTROL_HOVER,
+                text_color=TEXT_PRIMARY,
+            ).grid(row=1, column=0, pady=(6, 0), sticky="w")
 
         ctk.CTkButton(
             self, text="Save", command=self._save,
@@ -140,6 +153,11 @@ class SettingsWindow(ctk.CTkToplevel):
         path = filedialog.askdirectory(initialdir=self._path_var.get())
         if path:
             self._path_var.set(path)
+
+    def _reset_pairing(self):
+        if self._on_reset_pairing:
+            self._on_reset_pairing()
+        self.destroy()
 
     def _save(self):
         try:
@@ -152,7 +170,6 @@ class SettingsWindow(ctk.CTkToplevel):
         self._cfg["audio_format"] = self._format_var.get()
         self._cfg["filename_prefix"] = self._prefix_var.get().strip()
         self._cfg["start_with_windows"] = bool(self._autostart_var.get())
-        self._cfg["dual_track_recording"] = bool(self._dual_track_var.get())
         save_config(self._cfg)
         if self._cfg["start_with_windows"]:
             autostart.enable(autostart.current_executable_path())

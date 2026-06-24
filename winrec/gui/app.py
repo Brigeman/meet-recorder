@@ -12,7 +12,7 @@ import customtkinter as ctk
 import pystray
 
 from winrec import autostart
-from winrec.calls.queue import enqueue_upload
+from winrec.calls.queue import enqueue_upload, pending_count
 from winrec.calls.worker import CallsUploadWorker
 from winrec.config import APP_NAME, load_config, save_config
 from winrec.gui.cooldown import CooldownManager
@@ -90,6 +90,7 @@ class WinRecApp(ctk.CTk):
         self._upload_worker = CallsUploadWorker(
             get_config=lambda: self._cfg,
             on_upload_result=self._on_upload_result,
+            on_pending_changed=self._on_pending_changed,
         )
         self._upload_worker.start()
         self._create_tray()
@@ -154,11 +155,12 @@ class WinRecApp(ctk.CTk):
         except Exception:
             pass
 
-    def _maybe_show_setup_wizard(self) -> None:
-        if self._cfg.get("calls_setup_completed"):
-            return
-        if self._cfg.get("calls_setup_skipped"):
-            return
+    def _maybe_show_setup_wizard(self, *, force: bool = False) -> None:
+        if not force:
+            if self._cfg.get("calls_setup_completed"):
+                return
+            if self._cfg.get("calls_setup_skipped"):
+                return
 
         def _open():
             SetupWizard(self, self._cfg, self._on_setup_complete)
@@ -170,6 +172,21 @@ class WinRecApp(ctk.CTk):
         if cfg.get("calls_setup_completed"):
             self._notify_tray("Calls подключён", "Записи будут загружаться автоматически")
             log_event("calls_setup_completed")
+            self._upload_worker.enqueue_now()
+
+    def _on_pending_changed(self, count: int, waiting_for_network: bool) -> None:
+        def _notify():
+            if count <= 0:
+                return
+            if waiting_for_network:
+                self._notify_tray(
+                    "Ожидает VPN/сети",
+                    f"{count} записей ждут подключения к Calls",
+                )
+            else:
+                self._notify_tray("Загрузка", f"Отправка {count} записей в Calls…")
+
+        self.after(0, _notify)
 
     def _on_upload_result(self, job_id: str, success: bool, error: str | None) -> None:
         def _notify():
@@ -177,14 +194,59 @@ class WinRecApp(ctk.CTk):
                 self._notify_tray("Загрузка завершена", "Звонок отправлен в Calls")
                 log_event("upload_success", job_id=job_id)
             else:
-                self._notify_tray("Ошибка загрузки", "Не удалось отправить запись в Calls")
+                self._notify_tray(
+                    "Ошибка загрузки",
+                    "Запись сохранена локально; повторите позже или обратитесь в поддержку",
+                )
                 log_event("upload_failed", job_id=job_id, error=error)
+            remaining = pending_count()
+            if remaining > 0:
+                self._on_pending_changed(remaining, self._upload_worker.network_waiting)
 
         self.after(0, _notify)
 
+    def _resolve_audio_path(self, metadata: dict, file_path: str | None) -> str | None:
+        candidates: list[str] = []
+        for value in (
+            (metadata or {}).get("audio_file"),
+            (metadata or {}).get("wav_backup"),
+            file_path,
+        ):
+            if value and value not in candidates:
+                candidates.append(str(value))
+
+        for candidate in list(candidates):
+            sidecar = candidate.rsplit(".", 1)[0] + ".json"
+            if sidecar not in candidates:
+                candidates.append(sidecar)
+
+        for candidate in candidates:
+            if candidate.endswith(".json") and os.path.isfile(candidate):
+                try:
+                    import json
+
+                    with open(candidate, encoding="utf-8") as f:
+                        meta = json.load(f)
+                    audio = meta.get("audio_file") or meta.get("wav_backup")
+                    if audio and os.path.isfile(audio) and os.path.getsize(audio) > 0:
+                        return audio
+                except (OSError, json.JSONDecodeError, TypeError):
+                    continue
+            elif os.path.isfile(candidate) and os.path.getsize(candidate) > 0:
+                return candidate
+        return None
+
+    def _should_auto_upload(self) -> bool:
+        return bool(self._cfg.get("calls_auto_upload", True))
+
+    def _maybe_enqueue_recording(self, metadata: dict, file_path: str | None) -> None:
+        if not self._should_auto_upload():
+            return
+        self._enqueue_upload(metadata, file_path)
+
     def _enqueue_upload(self, metadata: dict, file_path: str | None) -> None:
-        audio_path = (metadata or {}).get("audio_file") or file_path
-        if not audio_path or not os.path.isfile(audio_path):
+        audio_path = self._resolve_audio_path(metadata or {}, file_path)
+        if not audio_path:
             log.warning("upload_skipped reason=missing_audio")
             return
         try:
@@ -194,7 +256,13 @@ class WinRecApp(ctk.CTk):
                 project_id=self._cfg.get("calls_default_project_id"),
                 api_base=self._cfg.get("calls_api_base_url", "https://calls.o2consult.ai"),
             )
-            self._notify_tray("Загрузка", "Отправка записи в Calls…")
+            if self._cfg.get("calls_device_token"):
+                self._notify_tray("Загрузка", "Отправка записи в Calls…")
+            else:
+                self._notify_tray(
+                    "Запись сохранена",
+                    "Будет отправлена в Calls после подключения",
+                )
             self._upload_worker.enqueue_now()
             log_event("upload_enqueued", audio_path=audio_path)
         except Exception as exc:
@@ -294,12 +362,7 @@ class WinRecApp(ctk.CTk):
             metadata = obj.get("metadata") or {}
             file_path = obj.get("file_path")
             log_event("recording_stopped", file_path=file_path)
-            if (
-                self._cfg.get("calls_setup_completed")
-                and self._cfg.get("calls_auto_upload")
-                and self._cfg.get("calls_device_token")
-            ):
-                self._enqueue_upload(metadata, file_path)
+            self._maybe_enqueue_recording(metadata, file_path)
         elif etype == "recording_failed":
             log.error("recording_failed: %s", obj.get("message"))
             self._recording = False
@@ -307,12 +370,7 @@ class WinRecApp(ctk.CTk):
             self._update_tray_icon()
             metadata = obj.get("metadata") or {}
             file_path = obj.get("file_path")
-            if (
-                self._cfg.get("calls_setup_completed")
-                and self._cfg.get("calls_auto_upload")
-                and self._cfg.get("calls_device_token")
-            ):
-                self._enqueue_upload(metadata, file_path)
+            self._maybe_enqueue_recording(metadata, file_path)
 
     def _on_dismiss(self, app: str):
         self._prompt_visible = False
@@ -366,9 +424,18 @@ class WinRecApp(ctk.CTk):
 
     def _tray_settings(self, icon=None, item=None):
         def _open():
-            SettingsWindow(self, self._cfg, self._on_config_saved)
+            SettingsWindow(self, self._cfg, self._on_config_saved, on_reset_pairing=self._on_reset_pairing)
 
         self.after(0, _open)
+
+    def _on_reset_pairing(self) -> None:
+        self._cfg["calls_setup_completed"] = False
+        self._cfg["calls_setup_skipped"] = False
+        self._cfg["calls_device_token"] = ""
+        self._cfg["calls_device_id"] = ""
+        self._cfg["calls_default_project_id"] = None
+        save_config(self._cfg)
+        self._maybe_show_setup_wizard(force=True)
 
     def _on_config_saved(self, cfg: dict):
         self._cfg = cfg

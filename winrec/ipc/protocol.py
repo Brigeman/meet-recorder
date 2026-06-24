@@ -5,7 +5,7 @@ from typing import Any, Iterator
 
 def write_jsonl_line(obj: dict[str, Any], stream=None) -> None:
     stream = stream or sys.stdout
-    stream.write(json.dumps(obj, ensure_ascii=False) + "\n")
+    stream.write(json.dumps(obj, ensure_ascii=True) + "\n")
     stream.flush()
 
 

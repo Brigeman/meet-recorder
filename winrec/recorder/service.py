@@ -110,21 +110,43 @@ class RecorderService:
             return
         try:
             meta = self._capture.stop()
+        except Exception as e:
+            log.error("capture stop failed: %s", e)
+            meta = self._capture.metadata
+            audio_file = meta.get("audio_file") or self._capture.current_file
+            write_jsonl_line(
+                {
+                    "type": "recording_failed",
+                    "session_id": self._session_id,
+                    "message": str(e),
+                    "file_path": audio_file,
+                    "metadata": meta,
+                    "timestamp": time.time(),
+                }
+            )
+            return
+
+        audio_file = meta.get("audio_file")
+        try:
             write_jsonl_line(
                 {
                     "type": "recording_stopped",
                     "session_id": self._session_id,
-                    "file_path": meta.get("audio_file"),
+                    "file_path": audio_file,
                     "metadata": meta,
                     "timestamp": time.time(),
                 }
             )
             log_event("recording_stopped", session_id=self._session_id)
         except Exception as e:
+            log.error("recording_stopped event failed: %s", e)
             write_jsonl_line(
                 {
-                    "type": "recording_failed",
-                    "message": str(e),
+                    "type": "recording_stopped",
+                    "session_id": self._session_id,
+                    "file_path": audio_file,
+                    "metadata": {},
+                    "partial": True,
                     "timestamp": time.time(),
                 }
             )

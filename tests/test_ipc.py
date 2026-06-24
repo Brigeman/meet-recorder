@@ -11,6 +11,14 @@ def test_jsonl_roundtrip(capsys):
     assert obj == {"type": "test", "value": 1}
 
 
+def test_jsonl_non_ascii_escaped(capsys):
+    write_jsonl_line({"device": "Headphones \u2014 USB"})
+    captured = capsys.readouterr().out.strip()
+    assert "\\u2014" in captured or "USB" in captured
+    obj = read_jsonl_line(captured)
+    assert obj["device"] == "Headphones \u2014 USB"
+
+
 def test_cooldown_dismiss():
     cm = CooldownManager(90, 120)
     assert cm.can_prompt("teams:1:abc")

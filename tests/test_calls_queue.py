@@ -2,6 +2,7 @@ import json
 import os
 from unittest.mock import patch
 
+import httpx
 import pytest
 
 from winrec.calls import queue as upload_queue
@@ -16,7 +17,7 @@ def pending_dir(tmp_path, monkeypatch):
 
 def test_enqueue_and_list_pending(pending_dir, tmp_path):
     audio = tmp_path / "sample.wav"
-    audio.write_bytes(b"RIFF....")
+    audio.write_bytes(b"RIFF" + b"\0" * 64)
 
     job_id = upload_queue.enqueue_upload(
         audio_path=str(audio),
@@ -35,7 +36,7 @@ def test_enqueue_and_list_pending(pending_dir, tmp_path):
 
 def test_process_job_success_removes_pending(pending_dir, tmp_path):
     audio = tmp_path / "sample.wav"
-    audio.write_bytes(b"RIFF....")
+    audio.write_bytes(b"RIFF" + b"\0" * 64)
     job_id = upload_queue.enqueue_upload(
         audio_path=str(audio),
         metadata={"started_at": "2026-05-28T10:00:00", "app": "Zoom"},
@@ -58,9 +59,9 @@ def test_process_job_success_removes_pending(pending_dir, tmp_path):
     assert upload_queue.list_pending_jobs() == []
 
 
-def test_process_job_retries_then_abandons(pending_dir, tmp_path):
+def test_process_job_network_keeps_pending(pending_dir, tmp_path):
     audio = tmp_path / "sample.wav"
-    audio.write_bytes(b"RIFF....")
+    audio.write_bytes(b"RIFF" + b"\0" * 64)
     upload_queue.enqueue_upload(
         audio_path=str(audio),
         metadata={"started_at": "2026-05-28T10:00:00", "app": "Zoom"},
@@ -69,11 +70,11 @@ def test_process_job_retries_then_abandons(pending_dir, tmp_path):
     )
 
     def upload_fn(*args, **kwargs):
-        raise RuntimeError("network down")
+        raise httpx.ConnectError("network down")
 
-    with patch.object(upload_queue, "MAX_ATTEMPTS", 2):
+    with patch.object(upload_queue, "MAX_CLIENT_ATTEMPTS", 2):
         job = upload_queue.list_pending_jobs()[0]
-        assert upload_queue.process_job(job, token="tok", upload_fn=upload_fn, build_title_fn=lambda m, p: "t", duration_fn=lambda m: None) == "retry"
+        assert upload_queue.process_job(job, token="tok", upload_fn=upload_fn, build_title_fn=lambda m, p: "t", duration_fn=lambda m: None) == "retry_network"
         job = upload_queue.list_pending_jobs()[0]
-        assert upload_queue.process_job(job, token="tok", upload_fn=upload_fn, build_title_fn=lambda m, p: "t", duration_fn=lambda m: None) == "abandoned"
-        assert upload_queue.list_pending_jobs() == []
+        assert upload_queue.process_job(job, token="tok", upload_fn=upload_fn, build_title_fn=lambda m, p: "t", duration_fn=lambda m: None) == "retry_network"
+        assert len(upload_queue.list_pending_jobs()) == 1

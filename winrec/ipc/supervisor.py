@@ -52,7 +52,7 @@ class ProcessSupervisor:
         import json
 
         try:
-            self._proc.stdin.write(json.dumps(obj, ensure_ascii=False) + "\n")
+            self._proc.stdin.write(json.dumps(obj, ensure_ascii=True) + "\n")
             self._proc.stdin.flush()
             return True
         except OSError as e:

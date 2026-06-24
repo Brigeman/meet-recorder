@@ -64,6 +64,12 @@ class StreamBundle:
     mic_error: threading.Event = field(default_factory=threading.Event)
 
 
+def _safe_device_label(name: str | None) -> str | None:
+    if not name:
+        return None
+    return name.encode("ascii", "backslashreplace").decode("ascii")
+
+
 class AudioCapture:
     def __init__(self, settings: dict):
         self._settings = settings
@@ -177,9 +183,9 @@ class AudioCapture:
                 capture_output=True,
                 check=True,
             )
-            os.remove(wav_path)
             self._output_path = out_path
             self._metadata["audio_file"] = out_path
+            self._metadata["wav_backup"] = wav_path
             self._write_metadata_json()
         except Exception as e:
             log.error("ffmpeg error: %s", e)
@@ -198,8 +204,8 @@ class AudioCapture:
 
     def _record_device(self, bundle: StreamBundle, *, switched: bool = False) -> None:
         entry = {
-            "loopback": bundle.lb_name,
-            "microphone": bundle.mic_name,
+            "loopback": _safe_device_label(bundle.lb_name),
+            "microphone": _safe_device_label(bundle.mic_name),
             "output_index": bundle.output_key[0] if bundle.output_key else None,
             "input_index": bundle.input_key[0] if bundle.input_key else None,
             "at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),

@@ -12,7 +12,7 @@ def test_process_job_claim_prevents_double_upload(tmp_path, monkeypatch):
     monkeypatch.setattr("winrec.calls.queue.ensure_pending_dir", lambda: None)
 
     audio_path = tmp_path / "call.wav"
-    audio_path.write_bytes(b"RIFF")
+    audio_path.write_bytes(b"RIFF" + b"\0" * 64)
 
     job_id = enqueue_upload(
         audio_path=str(audio_path),
