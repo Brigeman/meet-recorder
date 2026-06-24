@@ -5,12 +5,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
+pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="WASAPI is Windows-only")
+
 if "pyaudiowpatch" not in sys.modules:
     _fake_pyaudio = MagicMock()
     _fake_pyaudio.paWASAPI = 13
     sys.modules["pyaudiowpatch"] = _fake_pyaudio
 
-from winrec.recorder import devices
+from meetrec.recorder import devices
 def _mock_pyaudio(
     *,
     devices_list: list[dict],

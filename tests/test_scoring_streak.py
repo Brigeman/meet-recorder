@@ -1,4 +1,10 @@
-from winrec.detector.scoring import SignalSnapshot, compute_matched, compute_score
+import sys
+
+import pytest
+
+pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="Windows scoring profile")
+
+from meetrec.detector.scoring import SignalSnapshot, compute_matched, compute_score
 
 
 def test_meeting_audio_not_counted_without_streak_or_in_call():

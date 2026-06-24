@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from winrec.calls.queue import enqueue_upload, list_pending_jobs, process_job
+from meetrec.calls.queue import enqueue_upload, list_pending_jobs, process_job
 
 
 def test_process_job_claim_prevents_double_upload(tmp_path, monkeypatch):
-    monkeypatch.setattr("winrec.calls.queue.PENDING_DIR", str(tmp_path / "pending"))
-    monkeypatch.setattr("winrec.calls.queue.ensure_pending_dir", lambda: None)
+    monkeypatch.setattr("meetrec.calls.queue.PENDING_DIR", str(tmp_path / "pending"))
+    monkeypatch.setattr("meetrec.calls.queue.ensure_pending_dir", lambda: None)
 
     audio_path = tmp_path / "call.wav"
     audio_path.write_bytes(b"RIFF" + b"\0" * 64)

@@ -4,12 +4,12 @@ import os
 import psutil
 import pytest
 
-from winrec.ipc import single_instance
+from meetrec.ipc import single_instance
 
 
 @pytest.fixture
 def lock_path(tmp_path, monkeypatch):
-    path = str(tmp_path / "winrec.lock")
+    path = str(tmp_path / "meetrec.lock")
     monkeypatch.setattr(single_instance, "LOCK_FILE", path)
     return path
 
@@ -30,7 +30,7 @@ def test_stale_lock_dead_pid_is_overwritten(lock_path, monkeypatch):
     with open(lock_path, "w", encoding="utf-8") as f:
         json.dump({"pid": 999999, "create_time": 1.0, "name": "WinRec.exe"}, f)
 
-    monkeypatch.setattr(single_instance, "_is_winrec_process", lambda *a, **k: False)
+    monkeypatch.setattr(single_instance, "_is_meetrec_process", lambda *a, **k: False)
 
     assert single_instance.acquire_single_instance() is True
     assert _read(lock_path)["pid"] == os.getpid()

@@ -1,7 +1,7 @@
 import json
 
-from winrec.ipc.protocol import read_jsonl_line, write_jsonl_line
-from winrec.gui.cooldown import CooldownManager
+from meetrec.ipc.protocol import read_jsonl_line, write_jsonl_line
+from meetrec.gui.cooldown import CooldownManager
 
 
 def test_jsonl_roundtrip(capsys):

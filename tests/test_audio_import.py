@@ -9,6 +9,6 @@ pytest.importorskip("comtypes")
 
 @pytest.mark.skipif(sys.platform != "win32", reason="WASAPI probes are Windows-only")
 def test_audio_module_imports():
-    from winrec.detector.probes import audio  # noqa: F401
+    from meetrec.detector.probes import audio  # noqa: F401
 
     assert audio.SESSION_ACTIVE == 1

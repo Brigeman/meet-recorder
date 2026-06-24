@@ -1,6 +1,6 @@
 from collections import namedtuple
 
-from winrec.detector.probes.network import probe_meeting_app_network
+from meetrec.detector.probes.network import probe_meeting_app_network
 
 
 Addr = namedtuple("Addr", ["ip", "port"])

@@ -6,18 +6,18 @@ from PyInstaller.utils.hooks import collect_submodules
 block_cipher = None
 # SPECPATH is the build/ directory; parent is the repository root.
 root = Path(SPECPATH).parent
-winrec_hidden = collect_submodules("winrec")
+meetrec_hidden = collect_submodules("meetrec")
 
 a_gui = Analysis(
-    [str(root / "winrec" / "__main__.py")],
+    [str(root / "meetrec" / "__main__.py")],
     pathex=[str(root)],
     binaries=[],
     datas=[
-        (str(root / "winrec" / "resources" / "icons" / "*.png"), "winrec/resources/icons"),
-        (str(root / "winrec" / "resources" / "logo.png"), "winrec/resources"),
-        (str(root / "winrec" / "resources" / "winrec.ico"), "winrec/resources"),
+        (str(root / "meetrec" / "resources" / "icons" / "*.png"), "meetrec/resources/icons"),
+        (str(root / "meetrec" / "resources" / "logo.png"), "meetrec/resources"),
+        (str(root / "meetrec" / "resources" / "meetrec.ico"), "meetrec/resources"),
     ],
-    hiddenimports=winrec_hidden
+    hiddenimports=meetrec_hidden
     + [
         "pyaudiowpatch",
         "comtypes",
@@ -57,7 +57,7 @@ exe_gui = EXE(
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,
-    icon=str(root / "winrec" / "resources" / "winrec.ico"),
+    icon=str(root / "meetrec" / "resources" / "meetrec.ico"),
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
@@ -66,9 +66,9 @@ exe_gui = EXE(
 )
 
 a_det = Analysis(
-    [str(root / "winrec" / "detector" / "service.py")],
+    [str(root / "meetrec" / "detector" / "service.py")],
     pathex=[str(root)],
-    hiddenimports=winrec_hidden + ["comtypes", "pycaw", "psutil"],
+    hiddenimports=meetrec_hidden + ["comtypes", "pycaw", "psutil"],
     cipher=block_cipher,
 )
 pyz_det = PYZ(a_det.pure, a_det.zipped_data, cipher=block_cipher)
@@ -84,9 +84,9 @@ exe_det = EXE(
 )
 
 a_rec = Analysis(
-    [str(root / "winrec" / "recorder" / "service.py")],
+    [str(root / "meetrec" / "recorder" / "service.py")],
     pathex=[str(root)],
-    hiddenimports=winrec_hidden + ["pyaudiowpatch", "numpy", "imageio_ffmpeg"],
+    hiddenimports=meetrec_hidden + ["pyaudiowpatch", "numpy", "imageio_ffmpeg"],
     cipher=block_cipher,
 )
 pyz_rec = PYZ(a_rec.pure, a_rec.zipped_data, cipher=block_cipher)

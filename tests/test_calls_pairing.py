@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from winrec.calls.pairing import PairingError, apply_pairing_to_config, parse_pairing_code
+from meetrec.calls.pairing import PairingError, apply_pairing_to_config, parse_pairing_code
 
 
 def _make_code(payload: dict) -> str:

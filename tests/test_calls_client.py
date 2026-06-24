@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
-from winrec.calls.client import (
+from meetrec.calls.client import (
     CallsApiError,
     build_call_title,
     compute_duration_sec,
@@ -31,7 +31,7 @@ def test_heartbeat_ok():
     client = MagicMock()
     client.__enter__.return_value = client
     client.post.return_value = response
-    with patch("winrec.calls.client.httpx.Client", return_value=client):
+    with patch("meetrec.calls.client.httpx.Client", return_value=client):
         heartbeat("https://calls.o2consult.ai", "token")
     client.post.assert_called_once()
 
@@ -47,7 +47,7 @@ def test_upload_call_success(tmp_path):
     client.__enter__.return_value = client
     client.post.return_value = response
 
-    with patch("winrec.calls.client.httpx.Client", return_value=client):
+    with patch("meetrec.calls.client.httpx.Client", return_value=client):
         body = upload_call(
             "https://calls.o2consult.ai",
             "token",
@@ -69,7 +69,7 @@ def test_upload_call_http_error(tmp_path):
     client.__enter__.return_value = client
     client.post.return_value = response
 
-    with patch("winrec.calls.client.httpx.Client", return_value=client):
+    with patch("meetrec.calls.client.httpx.Client", return_value=client):
         with pytest.raises(CallsApiError):
             upload_call(
                 "https://calls.o2consult.ai",

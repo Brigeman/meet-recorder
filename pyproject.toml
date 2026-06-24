@@ -1,7 +1,7 @@
 [project]
 name = "desktop-meeting-recorder"
-version = "1.0.1"
-description = "Desktop Meeting Recorder — prompt-before-record for Windows calls"
+version = "1.0.2"
+description = "Desktop Meeting Recorder — prompt-before-record for Windows and macOS calls"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = []

@@ -1,4 +1,10 @@
-from winrec.detector.scoring import (
+import sys
+
+import pytest
+
+pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="Windows scoring profile")
+
+from meetrec.detector.scoring import (
     SignalSnapshot,
     SustainTracker,
     compute_matched,

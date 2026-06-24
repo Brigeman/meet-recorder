@@ -7,8 +7,8 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 
-from winrec.calls.client import CallsApiError
-from winrec.calls.queue import (
+from meetrec.calls.client import CallsApiError
+from meetrec.calls.queue import (
     classify_upload_error,
     enqueue_upload,
     list_pending_jobs,
@@ -18,9 +18,9 @@ from winrec.calls.queue import (
 
 @pytest.fixture
 def pending_dir(tmp_path, monkeypatch):
-    monkeypatch.setattr("winrec.calls.queue.PENDING_DIR", str(tmp_path / "pending"))
-    monkeypatch.setattr("winrec.calls.queue.FAILED_DIR", str(tmp_path / "failed"))
-    monkeypatch.setattr("winrec.calls.queue.ensure_pending_dir", lambda: None)
+    monkeypatch.setattr("meetrec.calls.queue.PENDING_DIR", str(tmp_path / "pending"))
+    monkeypatch.setattr("meetrec.calls.queue.FAILED_DIR", str(tmp_path / "failed"))
+    monkeypatch.setattr("meetrec.calls.queue.ensure_pending_dir", lambda: None)
     return tmp_path
 
 
@@ -57,7 +57,7 @@ def test_process_job_network_error_retries_without_increment(pending_dir, tmp_pa
 
 
 def test_process_job_client_error_moves_to_failed(pending_dir, tmp_path, monkeypatch):
-    monkeypatch.setattr("winrec.calls.queue.MAX_CLIENT_ATTEMPTS", 1)
+    monkeypatch.setattr("meetrec.calls.queue.MAX_CLIENT_ATTEMPTS", 1)
     audio = tmp_path / "sample.wav"
     audio.write_bytes(b"RIFF" + b"\0" * 64)
     enqueue_upload(

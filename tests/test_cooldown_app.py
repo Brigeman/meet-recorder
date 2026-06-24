@@ -1,4 +1,4 @@
-from winrec.gui.cooldown import CooldownManager
+from meetrec.gui.cooldown import CooldownManager
 
 
 def test_app_level_dismiss_blocks_other_context_keys():

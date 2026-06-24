@@ -34,7 +34,7 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
       - name: Build executables
-        run: pyinstaller build/winrec.spec --noconfirm --log-level INFO
+        run: pyinstaller build/meetrec.spec --noconfirm --log-level INFO
       - name: List build output
         run: dir dist
       - name: Create archive
@@ -46,3 +46,38 @@ jobs:
         with:
           files: DesktopMeetingRecorder-${{ github.ref_name }}-win64.zip
           generate_release_notes: true
+
+  build-macos:
+    needs: [test, build-windows]
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pyinstaller
+      - name: Build ScreenCaptureKit helper
+        run: bash meetrec/platform/macos/helper/build.sh
+      - name: Build app bundle
+        run: pyinstaller build/macrec.spec --noconfirm --log-level INFO
+      - name: Bundle system-audio helper
+        run: |
+          cp meetrec/platform/macos/helper/MeetRecSystemAudio \
+            "dist/Desktop Meeting Recorder.app/Contents/MacOS/MeetRecSystemAudio"
+          chmod +x "dist/Desktop Meeting Recorder.app/Contents/MacOS/MeetRecSystemAudio"
+      - name: Ad-hoc sign app bundle
+        run: codesign --force --deep --sign - "dist/Desktop Meeting Recorder.app"
+      - name: Create DMG
+        run: |
+          hdiutil create -volname "Desktop Meeting Recorder" \
+            -srcfolder "dist/Desktop Meeting Recorder.app" \
+            -ov -format UDZO "DesktopMeetingRecorder-${{ github.ref_name }}-macos.dmg"
+      - name: Upload macOS release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ github.ref_name }}" \
+            "DesktopMeetingRecorder-${{ github.ref_name }}-macos.dmg" --clobber
