@@ -107,7 +107,9 @@ class WinRecApp(ctk.CTk):
                 APP_NAME,
                 menu,
             )
-            threading.Thread(target=self._tray_icon.run, daemon=True).start()
+            # AppKit/NSApplication must run on the main thread (macOS 15+ crashes otherwise).
+            if sys.platform != "darwin":
+                threading.Thread(target=self._tray_icon.run, daemon=True).start()
         except Exception as exc:
             self._tray_icon = None
             log_event("tray_create_failed", error=str(exc))
@@ -452,6 +454,61 @@ class WinRecApp(ctk.CTk):
             self._recorder_sup.stop()
 
 
+def _run_gui_macos() -> int:
+    """macOS: CTk in a worker thread, pystray/AppKit on the main thread."""
+    init_done = threading.Event()
+    tk_finished = threading.Event()
+    app_ref: list[WinRecApp] = []
+    init_error: list[BaseException] = []
+
+    def tk_worker():
+        try:
+            app = WinRecApp()
+            try:
+                app.iconbitmap(app_ico_path())
+            except Exception:
+                pass
+            app_ref.append(app)
+        except Exception as exc:
+            init_error.append(exc)
+        finally:
+            init_done.set()
+        if not app_ref:
+            tk_finished.set()
+            return
+        try:
+            app_ref[0].mainloop()
+        finally:
+            app_ref[0]._upload_worker.stop()
+            app_ref[0]._detector_sup.stop()
+            app_ref[0]._recorder_sup.stop()
+            tk_finished.set()
+
+    threading.Thread(target=tk_worker, daemon=True, name="tk").start()
+    if not init_done.wait(timeout=60):
+        log.error("GUI init timed out on macOS")
+        return 1
+    if init_error:
+        log.exception("GUI fatal: %s", init_error[0])
+        return 1
+    if not app_ref:
+        log.error("GUI init failed on macOS")
+        return 1
+
+    app = app_ref[0]
+    try:
+        if app._tray_icon:
+            app._tray_icon.run()
+        else:
+            tk_finished.wait()
+    finally:
+        if app._tray_icon:
+            app._tray_icon.stop()
+        app.after(0, app.destroy)
+        tk_finished.wait(timeout=5)
+    return 0
+
+
 def run_gui() -> int:
     log_path = setup_process_logging("gui")
     logging.getLogger(__name__).info("gui_log_file=%s", log_path)
@@ -462,6 +519,8 @@ def run_gui() -> int:
         return 1
     log_event("single_instance_acquired")
     try:
+        if sys.platform == "darwin":
+            return _run_gui_macos()
         app = WinRecApp()
         try:
             app.iconbitmap(app_ico_path())
