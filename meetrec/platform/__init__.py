@@ -9,7 +9,7 @@ if sys.platform == "win32":
 elif sys.platform == "darwin":
     from meetrec.platform.macos import adapter as _impl
 else:
-    raise RuntimeError(f"Unsupported platform: {sys.platform}")
+    from meetrec.platform.linux import adapter as _impl
 
 APP_ID = _impl.APP_ID
 BROWSER_PROCESSES = _impl.BROWSER_PROCESSES
