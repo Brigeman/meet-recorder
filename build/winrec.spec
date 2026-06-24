@@ -15,7 +15,7 @@ a_gui = Analysis(
     datas=[
         (str(root / "meetrec" / "resources" / "icons" / "*.png"), "meetrec/resources/icons"),
         (str(root / "meetrec" / "resources" / "logo.png"), "meetrec/resources"),
-        (str(root / "meetrec" / "resources" / "meetrec.ico"), "meetrec/resources"),
+        (str(root / "winrec" / "resources" / "winrec.ico"), "meetrec/resources"),
     ],
     hiddenimports=meetrec_hidden
     + [
@@ -57,7 +57,7 @@ exe_gui = EXE(
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,
-    icon=str(root / "meetrec" / "resources" / "meetrec.ico"),
+    icon=str(root / "winrec" / "resources" / "winrec.ico"),
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

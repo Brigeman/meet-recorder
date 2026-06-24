@@ -48,7 +48,7 @@ jobs:
           generate_release_notes: true
 
   build-macos:
-    needs: [test, build-windows]
+    needs: test
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -76,8 +76,8 @@ jobs:
             -srcfolder "dist/Desktop Meeting Recorder.app" \
             -ov -format UDZO "DesktopMeetingRecorder-${{ github.ref_name }}-macos.dmg"
       - name: Upload macOS release asset
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release upload "${{ github.ref_name }}" \
-            "DesktopMeetingRecorder-${{ github.ref_name }}-macos.dmg" --clobber
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: DesktopMeetingRecorder-${{ github.ref_name }}-macos.dmg
+          generate_release_notes: false

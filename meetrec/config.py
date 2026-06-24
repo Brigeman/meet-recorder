@@ -8,7 +8,7 @@ if sys.platform == "win32":
 elif sys.platform == "darwin":
     from meetrec.platform.macos import paths as _paths
 else:
-    raise RuntimeError(f"Unsupported platform: {sys.platform}")
+    from meetrec.platform.linux import paths as _paths
 
 APP_NAME = "Desktop Meeting Recorder"
 APP_ID = _paths.APP_ID
