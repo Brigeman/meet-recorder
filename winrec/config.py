@@ -31,6 +31,7 @@ DEFAULTS = {
     "enable_experimental_uia": False,
     "recordings_dir": DEFAULT_RECORDINGS_DIR,
     "audio_format": "wav",
+    "dual_track_recording": False,
     "filename_prefix": "meeting",
     "notifications": True,
     "start_with_windows": True,

@@ -27,7 +27,7 @@ class SettingsWindow(ctk.CTkToplevel):
         self._cfg = dict(config)
         self._on_save = on_save
         self.title("Settings")
-        self.geometry("420x350")
+        self.geometry("420x390")
         self.resizable(False, False)
         self.configure(fg_color=BG_DARK)
         self._build()
@@ -109,6 +109,28 @@ class SettingsWindow(ctk.CTkToplevel):
             text_color=TEXT_PRIMARY,
         ).grid(row=6, column=1, padx=(0, 12), pady=(8, 6), sticky="w")
 
+        self._dual_track_var = ctk.BooleanVar(
+            value=bool(self._cfg.get("dual_track_recording", False))
+        )
+        ctk.CTkLabel(
+            card,
+            text="Dual track (L=remote, R=mic)",
+            font=("Segoe UI", 11),
+            text_color=TEXT_SECONDARY,
+        ).grid(row=7, column=0, padx=14, pady=(0, 6), sticky="w")
+        ctk.CTkSwitch(
+            card,
+            text="Enable",
+            variable=self._dual_track_var,
+            onvalue=True,
+            offvalue=False,
+            fg_color=ACCENT_PRIMARY,
+            progress_color=ACCENT_PRIMARY,
+            button_color=TEXT_PRIMARY,
+            button_hover_color=TEXT_SECONDARY,
+            text_color=TEXT_PRIMARY,
+        ).grid(row=7, column=1, padx=(0, 12), pady=(0, 6), sticky="w")
+
         ctk.CTkButton(
             self, text="Save", command=self._save,
             fg_color=ACCENT_PRIMARY, hover_color=ACCENT_PRIMARY_HOVER,
@@ -130,6 +152,7 @@ class SettingsWindow(ctk.CTkToplevel):
         self._cfg["audio_format"] = self._format_var.get()
         self._cfg["filename_prefix"] = self._prefix_var.get().strip()
         self._cfg["start_with_windows"] = bool(self._autostart_var.get())
+        self._cfg["dual_track_recording"] = bool(self._dual_track_var.get())
         save_config(self._cfg)
         if self._cfg["start_with_windows"]:
             autostart.enable(autostart.current_executable_path())
