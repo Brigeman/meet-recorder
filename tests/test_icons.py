@@ -1,4 +1,4 @@
-from winrec.gui.icons import load_logo_image, make_tray_icon
+from meetrec.gui.icons import load_logo_image, make_tray_icon
 
 
 def test_load_logo_image_has_requested_size():

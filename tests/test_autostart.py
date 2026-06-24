@@ -1,6 +1,9 @@
+import sys
 from types import SimpleNamespace
 
-from winrec import autostart
+import pytest
+
+from meetrec import autostart
 
 
 class _FakeWinReg:
@@ -43,6 +46,7 @@ class _FakeKey:
         return False
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="Only Linux lacks autostart in CI")
 def test_autostart_noop_on_non_windows(monkeypatch):
     monkeypatch.setattr(autostart, "is_supported", lambda: False)
     assert autostart.enable("C:\\WinRec.exe") is False
@@ -50,6 +54,7 @@ def test_autostart_noop_on_non_windows(monkeypatch):
     assert autostart.get_registered_path() is None
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows registry autostart")
 def test_autostart_enable_disable(monkeypatch):
     fake_reg = _FakeWinReg()
     monkeypatch.setattr(autostart, "is_supported", lambda: True)
@@ -57,12 +62,26 @@ def test_autostart_enable_disable(monkeypatch):
 
     assert autostart.enable("C:\\Apps\\WinRec.exe")
     assert autostart.is_enabled()
-    assert "WinRec" in fake_reg.values
+    assert "MeetRec" in fake_reg.values
 
     assert autostart.disable()
     assert not autostart.is_enabled()
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows frozen executable path")
 def test_current_executable_path_for_frozen(monkeypatch):
-    monkeypatch.setattr(autostart, "sys", SimpleNamespace(frozen=True, executable="C:\\Apps\\WinRec.exe"))
-    assert autostart.current_executable_path().endswith("WinRec.exe")
+    import meetrec.platform.windows.autostart as win_autostart
+
+    monkeypatch.setattr(
+        win_autostart.sys,
+        "frozen",
+        True,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        win_autostart.sys,
+        "executable",
+        "C:\\Apps\\WinRec.exe",
+        raising=False,
+    )
+    assert win_autostart.current_executable_path().endswith("WinRec.exe")

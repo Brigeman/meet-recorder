@@ -1,4 +1,10 @@
-from winrec.detector.scoring import SignalSnapshot, compute_score
+import sys
+
+import pytest
+
+pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="Windows scoring profile")
+
+from meetrec.detector.scoring import SignalSnapshot, compute_score
 
 
 def test_desktop_teams_in_call_signals_cross_threshold():

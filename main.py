@@ -1,6 +1,6 @@
-"""Entry point — delegates to Desktop Meeting Recorder (winrec)."""
+"""Entry point — delegates to Desktop Meeting Recorder (meetrec)."""
 
-from winrec.gui.app import run_gui
+from meetrec.gui.app import run_gui
 
 
 def main():

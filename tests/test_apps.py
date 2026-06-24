@@ -1,5 +1,11 @@
-from winrec.detector.apps import PROCESS_TO_APP, webview2_has_valid_ancestor
-from winrec.detector.scoring import match_title_hint
+import sys
+
+import pytest
+
+pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="Windows app mapping")
+
+from meetrec.detector.titles import match_title_hint
+from meetrec.platform.windows.apps import PROCESS_TO_APP, webview2_has_valid_ancestor
 
 
 def test_process_to_app_teams():

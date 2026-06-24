@@ -3,7 +3,7 @@
 import ast
 from pathlib import Path
 
-_PROBES = Path(__file__).resolve().parents[1] / "winrec" / "detector" / "probes"
+_PROBES = Path(__file__).resolve().parents[1] / "meetrec" / "detector" / "probes"
 
 
 def _imports_match_title_hint_from_apps(path: Path) -> bool:
@@ -11,7 +11,7 @@ def _imports_match_title_hint_from_apps(path: Path) -> bool:
     for node in ast.walk(tree):
         if not isinstance(node, ast.ImportFrom):
             continue
-        if node.module != "winrec.detector.apps":
+        if node.module != "meetrec.detector.apps":
             continue
         if any(alias.name == "match_title_hint" for alias in node.names):
             return True

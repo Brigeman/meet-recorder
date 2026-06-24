@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from winrec.recorder.audio_mix import interleave_stereo, mix_mono, peak_level, resample, to_mono
+from meetrec.recorder.audio_mix import interleave_stereo, mix_mono, peak_level, resample, to_mono
 
 
 def test_to_mono_stereo():

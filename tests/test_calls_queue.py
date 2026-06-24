@@ -5,7 +5,7 @@ from unittest.mock import patch
 import httpx
 import pytest
 
-from winrec.calls import queue as upload_queue
+from meetrec.calls import queue as upload_queue
 
 
 @pytest.fixture

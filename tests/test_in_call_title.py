@@ -1,4 +1,4 @@
-from winrec.detector.apps import match_in_call_title
+from meetrec.detector.apps import match_in_call_title
 
 
 def test_teams_timer_title_detected():

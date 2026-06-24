@@ -21,4 +21,4 @@ if errorlevel 1 (
     pip install -r requirements.txt
 )
 
-start /b pythonw -m winrec
+start /b pythonw -m meetrec
