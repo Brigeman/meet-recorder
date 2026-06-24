@@ -1,48 +1,91 @@
 import atexit
+import json
 import os
-import sys
 
 from winrec.config import LOCK_FILE
+from winrec.logging_util import log_event
+
+_CREATE_TIME_EPSILON = 1.0
 
 
 def acquire_single_instance() -> bool:
-    os.makedirs(os.path.dirname(LOCK_FILE), exist_ok=True)
     try:
+        os.makedirs(os.path.dirname(LOCK_FILE), exist_ok=True)
         if os.path.exists(LOCK_FILE):
-            with open(LOCK_FILE, encoding="utf-8") as f:
-                old_pid = int(f.read().strip() or "0")
-            if old_pid and _pid_alive(old_pid):
+            record = _read_lock()
+            if record is None:
+                log_event("single_instance_stale_lock", reason="corrupt")
+            elif _is_winrec_process(
+                record.get("pid"), record.get("create_time"), record.get("name")
+            ):
                 return False
-        with open(LOCK_FILE, "w", encoding="utf-8") as f:
-            f.write(str(os.getpid()))
+            else:
+                log_event("single_instance_stale_lock", pid=record.get("pid"))
+        _write_lock()
         atexit.register(release_single_instance)
         return True
-    except OSError:
+    except Exception:
         return True
 
 
 def release_single_instance() -> None:
     try:
         if os.path.exists(LOCK_FILE):
-            with open(LOCK_FILE, encoding="utf-8") as f:
-                if f.read().strip() == str(os.getpid()):
-                    os.remove(LOCK_FILE)
+            record = _read_lock()
+            if record is not None and record.get("pid") == os.getpid():
+                os.remove(LOCK_FILE)
     except OSError:
         pass
 
 
-def _pid_alive(pid: int) -> bool:
-    if sys.platform != "win32":
-        try:
-            os.kill(pid, 0)
-            return True
-        except OSError:
-            return False
-    import ctypes
+def _read_lock() -> dict | None:
+    try:
+        with open(LOCK_FILE, encoding="utf-8") as f:
+            record = json.load(f)
+        if isinstance(record, dict) and "pid" in record:
+            return record
+        return None
+    except (OSError, ValueError):
+        return None
 
-    kernel32 = ctypes.windll.kernel32
-    handle = kernel32.OpenProcess(0x1000, False, pid)
-    if not handle:
+
+def _write_lock() -> None:
+    pid = os.getpid()
+    create_time = None
+    name = None
+    try:
+        import psutil
+
+        proc = psutil.Process(pid)
+        create_time = proc.create_time()
+        name = proc.name()
+    except Exception:
+        pass
+    record = {"pid": pid, "create_time": create_time, "name": name}
+    with open(LOCK_FILE, "w", encoding="utf-8") as f:
+        json.dump(record, f)
+
+
+def _is_winrec_process(pid, create_time, name) -> bool:
+    if not isinstance(pid, int):
         return False
-    kernel32.CloseHandle(handle)
+    try:
+        import psutil
+    except Exception:
+        return False
+    try:
+        proc = psutil.Process(pid)
+        actual_create = proc.create_time()
+        actual_name = proc.name()
+    except Exception:
+        return False
+
+    if create_time is not None and abs(actual_create - create_time) > _CREATE_TIME_EPSILON:
+        return False
+
+    if name is not None and actual_name != name:
+        lowered = (actual_name or "").lower()
+        if "winrec" not in lowered and "python" not in lowered:
+            return False
+
     return True

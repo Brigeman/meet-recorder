@@ -21,7 +21,7 @@ from winrec.gui.panel import FloatingPanel
 from winrec.gui.prompt import MeetingPrompt
 from winrec.gui.settings import SettingsWindow
 from winrec.gui.setup_wizard import SetupWizard
-from winrec.ipc.single_instance import acquire_single_instance
+from winrec.ipc.single_instance import acquire_single_instance, release_single_instance
 from winrec.ipc.supervisor import ProcessSupervisor
 from winrec.logging_util import log_event, setup_process_logging
 log = logging.getLogger(__name__)
@@ -98,24 +98,48 @@ class WinRecApp(ctk.CTk):
         log_event("app_start", recordings_dir=self._cfg.get("recordings_dir"))
 
     def _create_tray(self):
-        menu = pystray.Menu(
-            pystray.MenuItem(
-                lambda _: "Stop recording" if self._recording else "Start recording",
-                self._tray_toggle_record,
-                default=True,
-            ),
-            pystray.MenuItem("Open recordings folder", self._tray_open_folder),
-            pystray.MenuItem("Settings", self._tray_settings),
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Quit", self._tray_quit),
-        )
-        self._tray_icon = pystray.Icon(
-            APP_NAME,
-            make_tray_icon(self._state),
-            APP_NAME,
-            menu,
-        )
-        threading.Thread(target=self._tray_icon.run, daemon=True).start()
+        try:
+            menu = pystray.Menu(
+                pystray.MenuItem(
+                    lambda _: "Stop recording" if self._recording else "Start recording",
+                    self._tray_toggle_record,
+                    default=True,
+                ),
+                pystray.MenuItem("Open recordings folder", self._tray_open_folder),
+                pystray.MenuItem("Settings", self._tray_settings),
+                pystray.Menu.SEPARATOR,
+                pystray.MenuItem("Quit", self._tray_quit),
+            )
+            self._tray_icon = pystray.Icon(
+                APP_NAME,
+                make_tray_icon(self._state),
+                APP_NAME,
+                menu,
+            )
+            threading.Thread(target=self._tray_icon.run, daemon=True).start()
+        except Exception as exc:
+            self._tray_icon = None
+            log_event("tray_create_failed", error=str(exc))
+            log.exception("tray_create_failed: %s", exc)
+            self._show_without_tray()
+
+    def _show_without_tray(self):
+        try:
+            self.overrideredirect(False)
+            self.geometry("360x120+120+120")
+            self.deiconify()
+        except Exception:
+            pass
+        if sys.platform == "win32":
+            try:
+                ctypes.windll.user32.MessageBoxW(
+                    0,
+                    "Не удалось создать значок в трее. Окно показано напрямую.",
+                    APP_NAME,
+                    0x30,
+                )
+            except Exception:
+                pass
 
     def _update_tray_icon(self):
         if self._tray_icon:
@@ -355,6 +379,7 @@ class WinRecApp(ctk.CTk):
         self._recorder_sup.stop()
         if self._tray_icon:
             self._tray_icon.stop()
+        release_single_instance()
         self.after(0, self.destroy)
 
     def run(self):
@@ -372,6 +397,16 @@ def run_gui() -> int:
     if not acquire_single_instance():
         log_event("single_instance_duplicate")
         log.warning("Another instance is already running")
+        if sys.platform == "win32":
+            try:
+                ctypes.windll.user32.MessageBoxW(
+                    0,
+                    "Desktop Meeting Recorder уже запущен.",
+                    APP_NAME,
+                    0x40,
+                )
+            except Exception:
+                pass
         return 1
     log_event("single_instance_acquired")
     try:
@@ -384,4 +419,6 @@ def run_gui() -> int:
     except Exception as e:
         log.exception("GUI fatal: %s", e)
         return 1
+    finally:
+        release_single_instance()
     return 0
