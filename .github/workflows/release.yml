@@ -68,13 +68,8 @@ jobs:
           cp meetrec/platform/macos/helper/MeetRecSystemAudio \
             "dist/Desktop Meeting Recorder.app/Contents/MacOS/MeetRecSystemAudio"
           chmod +x "dist/Desktop Meeting Recorder.app/Contents/MacOS/MeetRecSystemAudio"
-      - name: Ad-hoc sign app bundle
-        run: codesign --force --deep --sign - "dist/Desktop Meeting Recorder.app"
-      - name: Create DMG
-        run: |
-          hdiutil create -volname "Desktop Meeting Recorder" \
-            -srcfolder "dist/Desktop Meeting Recorder.app" \
-            -ov -format UDZO "DesktopMeetingRecorder-${{ github.ref_name }}-macos.dmg"
+      - name: Create DMG with Applications shortcut
+        run: bash build/create-macos-dmg.sh "DesktopMeetingRecorder-${{ github.ref_name }}-macos.dmg"
       - name: Upload macOS release asset
         uses: softprops/action-gh-release@v2
         with:
