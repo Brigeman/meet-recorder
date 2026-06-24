@@ -93,6 +93,26 @@ def _remove_job_dir(job_path: Path) -> None:
     shutil.rmtree(job_path, ignore_errors=True)
 
 
+def _try_claim_job(job_path: Path) -> bool:
+    lock_path = job_path / "job.lock"
+    try:
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.close(fd)
+        return True
+    except FileExistsError:
+        return False
+    except OSError:
+        return False
+
+
+def _release_job_lock(job_path: Path) -> None:
+    lock_path = job_path / "job.lock"
+    try:
+        lock_path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def process_job(
     job: dict[str, Any],
     *,
@@ -101,9 +121,11 @@ def process_job(
     build_title_fn: Callable[[dict[str, Any], str], str],
     duration_fn: Callable[[dict[str, Any]], int | None],
 ) -> str:
-    """Returns: success | retry | abandoned."""
+    """Returns: success | retry | abandoned | busy."""
     job_id = job["job_id"]
     job_path = _job_dir(job_id)
+    if not _try_claim_job(job_path):
+        return "busy"
     metadata = job.get("metadata") or {}
     audio_path = job.get("audio_path") or ""
     started_at = metadata.get("started_at")
@@ -138,3 +160,5 @@ def process_job(
             _remove_job_dir(job_path)
             return "abandoned"
         return "retry"
+    finally:
+        _release_job_lock(job_path)

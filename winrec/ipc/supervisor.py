@@ -84,12 +84,16 @@ class ProcessSupervisor:
         log.info("subprocess_start name=%s cmd=%s", self._name, " ".join(self._args))
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"
+        env["PYTHONUTF8"] = "1"
+        env["PYTHONIOENCODING"] = "utf-8"
         self._proc = subprocess.Popen(
             self._args,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             bufsize=1,
             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
             env=env,

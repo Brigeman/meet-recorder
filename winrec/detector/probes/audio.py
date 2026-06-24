@@ -14,6 +14,9 @@ from pycaw.pycaw import (
 
 # WASAPI AudioSessionStateActive — use int for pycaw builds without AudioSessionState enum.
 SESSION_ACTIVE = 1
+DEVICE_STATE_ACTIVE = 0x00000001
+ROLE_CONSOLE = 0
+ROLE_COMMUNICATIONS = 2
 
 from winrec.config import BROWSER_PROCESSES
 from winrec.detector.apps import PROCESS_TO_APP, WEBVIEW2, webview2_has_valid_ancestor
@@ -24,6 +27,39 @@ LOOPBACK_PEAK_THRESHOLD = 0.02
 MIC_PEAK_THRESHOLD = 0.015
 
 
+def _device_id(device) -> str | None:
+    try:
+        return str(device.GetId())
+    except Exception:
+        return None
+
+
+def _iter_audio_endpoints(enumerator, flow: int):
+    """Yield unique active/default capture or render endpoints (speakers + headset)."""
+    seen: set[str] = set()
+
+    try:
+        collection = enumerator.EnumAudioEndpoints(flow, DEVICE_STATE_ACTIVE)
+        for index in range(collection.GetCount()):
+            device = collection.Item(index)
+            dev_id = _device_id(device)
+            if dev_id and dev_id not in seen:
+                seen.add(dev_id)
+                yield device
+    except Exception as exc:
+        log.debug("EnumAudioEndpoints failed flow=%s: %s", flow, exc)
+
+    for role in (ROLE_CONSOLE, ROLE_COMMUNICATIONS):
+        try:
+            device = enumerator.GetDefaultAudioEndpoint(flow, role)
+            dev_id = _device_id(device)
+            if dev_id and dev_id not in seen:
+                seen.add(dev_id)
+                yield device
+        except Exception:
+            continue
+
+
 def probe_audio_activity() -> tuple[bool, bool]:
     mic = False
     loopback = False
@@ -31,9 +67,15 @@ def probe_audio_activity() -> tuple[bool, bool]:
         enumerator = CoCreateInstance(
             CLSID_MMDeviceEnumerator, IMMDeviceEnumerator, CLSCTX_ALL
         )
-        mic_active = _probe_capture_sessions(enumerator)
-        loopback_active = _probe_render_peak(enumerator)
-        return mic_active, loopback_active
+        for device in _iter_audio_endpoints(enumerator, 1):
+            if _probe_capture_sessions_on_device(device):
+                mic = True
+                break
+        for device in _iter_audio_endpoints(enumerator, 0):
+            if _probe_render_peak_on_device(device):
+                loopback = True
+                break
+        return mic, loopback
     except Exception as e:
         log.debug("audio probe failed: %s", e)
         return mic, loopback
@@ -47,26 +89,34 @@ def probe_meeting_app_audio(meeting_pids: set[int]) -> tuple[bool, bool, float, 
         enumerator = CoCreateInstance(
             CLSID_MMDeviceEnumerator, IMMDeviceEnumerator, CLSCTX_ALL
         )
-        cap_active, cap_peak = _probe_endpoint_sessions(
-            enumerator=enumerator,
-            flow=1,
-            meeting_pids=meeting_pids,
-        )
-        ren_active, ren_peak = _probe_endpoint_sessions(
-            enumerator=enumerator,
-            flow=0,
-            meeting_pids=meeting_pids,
-        )
+        cap_active = False
+        cap_peak = 0.0
+        for device in _iter_audio_endpoints(enumerator, 1):
+            active, peak = _probe_endpoint_sessions_on_device(
+                device=device,
+                meeting_pids=meeting_pids,
+            )
+            cap_active = cap_active or active
+            cap_peak = max(cap_peak, peak)
+
+        ren_active = False
+        ren_peak = 0.0
+        for device in _iter_audio_endpoints(enumerator, 0):
+            active, peak = _probe_endpoint_sessions_on_device(
+                device=device,
+                meeting_pids=meeting_pids,
+            )
+            ren_active = ren_active or active
+            ren_peak = max(ren_peak, peak)
         return cap_active, ren_active, cap_peak, ren_peak
     except Exception as e:
         log.debug("meeting app audio probe failed: %s", e)
         return False, False, 0.0, 0.0
 
 
-def _probe_capture_sessions(enumerator) -> bool:
+def _probe_capture_sessions_on_device(device) -> bool:
     try:
-        mic_device = enumerator.GetDefaultAudioEndpoint(1, 0)
-        raw = mic_device.Activate(IAudioSessionManager2._iid_, CLSCTX_ALL, None)
+        raw = device.Activate(IAudioSessionManager2._iid_, CLSCTX_ALL, None)
         mgr = raw.QueryInterface(IAudioSessionManager2)
         session_enum = mgr.GetSessionEnumerator()
     except Exception:
@@ -89,9 +139,12 @@ def _probe_capture_sessions(enumerator) -> bool:
     return False
 
 
-def _probe_endpoint_sessions(enumerator, flow: int, meeting_pids: set[int]) -> tuple[bool, float]:
+def _probe_endpoint_sessions_on_device(
+    *,
+    device,
+    meeting_pids: set[int],
+) -> tuple[bool, float]:
     try:
-        device = enumerator.GetDefaultAudioEndpoint(flow, 0)
         raw = device.Activate(IAudioSessionManager2._iid_, CLSCTX_ALL, None)
         mgr = raw.QueryInterface(IAudioSessionManager2)
         session_enum = mgr.GetSessionEnumerator()
@@ -115,10 +168,9 @@ def _probe_endpoint_sessions(enumerator, flow: int, meeting_pids: set[int]) -> t
     return active, peak
 
 
-def _probe_render_peak(enumerator) -> bool:
+def _probe_render_peak_on_device(device) -> bool:
     try:
-        render = enumerator.GetDefaultAudioEndpoint(0, 0)
-        raw = render.Activate(IAudioMeterInformation._iid_, CLSCTX_ALL, None)
+        raw = device.Activate(IAudioMeterInformation._iid_, CLSCTX_ALL, None)
         meter = raw.QueryInterface(IAudioMeterInformation)
         peak = meter.GetPeakValue()
         return peak >= LOOPBACK_PEAK_THRESHOLD
@@ -140,27 +192,30 @@ def mic_used_by_meeting_process() -> bool:
         enumerator = CoCreateInstance(
             CLSID_MMDeviceEnumerator, IMMDeviceEnumerator, CLSCTX_ALL
         )
-        mic_device = enumerator.GetDefaultAudioEndpoint(1, 0)
-        raw = mic_device.Activate(IAudioSessionManager2._iid_, CLSCTX_ALL, None)
-        mgr = raw.QueryInterface(IAudioSessionManager2)
-        session_enum = mgr.GetSessionEnumerator()
+        for device in _iter_audio_endpoints(enumerator, 1):
+            try:
+                raw = device.Activate(IAudioSessionManager2._iid_, CLSCTX_ALL, None)
+                mgr = raw.QueryInterface(IAudioSessionManager2)
+                session_enum = mgr.GetSessionEnumerator()
+            except Exception:
+                continue
+
+            for i in range(session_enum.GetCount()):
+                ctl = session_enum.GetSession(i)
+                if ctl.GetState() != SESSION_ACTIVE:
+                    continue
+                try:
+                    ctl2 = ctl.QueryInterface(IAudioSessionControl2)
+                    pid = ctl2.GetProcessId()
+                    if pid == 0:
+                        continue
+                    name = psutil.Process(pid).name().lower()
+                    if name in PROCESS_TO_APP or name in BROWSER_PROCESSES:
+                        return True
+                    if name == WEBVIEW2 and webview2_has_valid_ancestor(pid):
+                        return True
+                except Exception:
+                    continue
     except Exception:
         return False
-
-    for i in range(session_enum.GetCount()):
-        ctl = session_enum.GetSession(i)
-        if ctl.GetState() != SESSION_ACTIVE:
-            continue
-        try:
-            ctl2 = ctl.QueryInterface(IAudioSessionControl2)
-            pid = ctl2.GetProcessId()
-            if pid == 0:
-                continue
-            name = psutil.Process(pid).name().lower()
-            if name in PROCESS_TO_APP or name in BROWSER_PROCESSES:
-                return True
-            if name == WEBVIEW2 and webview2_has_valid_ancestor(pid):
-                return True
-        except Exception:
-            continue
     return False

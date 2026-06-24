@@ -33,6 +33,7 @@ class CallsUploadWorker:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._last_heartbeat = 0.0
+        self._drain_lock = threading.Lock()
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -75,6 +76,10 @@ class CallsUploadWorker:
             log.warning("heartbeat_failed error=%s", exc)
 
     def _drain_once(self) -> None:
+        with self._drain_lock:
+            self._drain_once_locked()
+
+    def _drain_once_locked(self) -> None:
         cfg = self._get_config()
         if not cfg.get("calls_setup_completed"):
             return
@@ -92,6 +97,8 @@ class CallsUploadWorker:
                 build_title_fn=build_call_title,
                 duration_fn=compute_duration_sec,
             )
+            if result == "busy":
+                continue
             if self._on_upload_result and result in ("success", "abandoned"):
                 self._on_upload_result(
                     str(job.get("job_id", "")),

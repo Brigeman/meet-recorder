@@ -305,6 +305,14 @@ class WinRecApp(ctk.CTk):
             self._recording = False
             self._panel.hide_panel()
             self._update_tray_icon()
+            metadata = obj.get("metadata") or {}
+            file_path = obj.get("file_path")
+            if (
+                self._cfg.get("calls_setup_completed")
+                and self._cfg.get("calls_auto_upload")
+                and self._cfg.get("calls_device_token")
+            ):
+                self._enqueue_upload(metadata, file_path)
 
     def _on_dismiss(self, app: str):
         self._prompt_visible = False
