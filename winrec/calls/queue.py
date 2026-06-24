@@ -121,6 +121,9 @@ def process_job(
             audio_path=audio_path,
             project_id=job.get("project_id"),
             duration_sec=duration_fn(metadata),
+            ended_at=str(metadata.get("ended_at")) if metadata.get("ended_at") else None,
+            app=str(metadata.get("app")) if metadata.get("app") else None,
+            meeting_hint=str(metadata.get("meeting_hint")) if metadata.get("meeting_hint") else None,
         )
         _remove_job_dir(job_path)
         return "success"

@@ -6,7 +6,7 @@ import queue
 import subprocess
 import threading
 import wave
-from datetime import datetime
+from datetime import datetime, timezone
 
 import imageio_ffmpeg
 import numpy as np
@@ -77,16 +77,17 @@ class AudioCapture:
             tag = tag[:MAX_FILENAME]
         return os.path.join(base_dir, f"{tag}.wav")
 
-    def start(self, session_id: str, app: str, matched: list[str] | None = None) -> str:
+    def start(self, session_id: str, app: str, matched: list[str] | None = None, meeting_hint: str | None = None) -> str:
         if self.is_recording:
             return self._output_path or ""
 
         self._output_path = self.build_output_path(app, session_id)
         self._metadata = {
             "session_id": session_id,
-            "started_at": datetime.now().isoformat(timespec="seconds"),
+            "started_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
             "app": app,
             "detected_by": matched or [],
+            "meeting_hint": (meeting_hint or "").strip() or None,
             "user_confirmed": True,
             "audio_file": self._output_path,
         }
@@ -104,7 +105,7 @@ class AudioCapture:
         self._file_closed.wait(timeout=10)
         self._thread.join(timeout=5)
         self._thread = None
-        self._metadata["ended_at"] = datetime.now().isoformat(timespec="seconds")
+        self._metadata["ended_at"] = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
         self._write_metadata_json()
 
         fmt = self._settings.get("audio_format", "wav")

@@ -295,10 +295,11 @@ class WinRecApp(ctk.CTk):
         cand = self._pending_candidate or {}
         self._last_context = cand.get("context_key", app)
         self._last_app = app
+        meeting_hint = cand.get("context_key") or cand.get("window_title") or app
         self._pending_candidate = None
-        self._start_recording(app, cand.get("matched", []))
+        self._start_recording(app, cand.get("matched", []), meeting_hint=meeting_hint)
 
-    def _start_recording(self, app: str, matched: list | None = None):
+    def _start_recording(self, app: str, matched: list | None = None, meeting_hint: str | None = None):
         if self._recording:
             return
         self._session_id = str(uuid.uuid4())
@@ -308,6 +309,7 @@ class WinRecApp(ctk.CTk):
                 "session_id": self._session_id,
                 "app": app,
                 "matched": matched or [],
+                "meeting_hint": meeting_hint,
             }
         )
 

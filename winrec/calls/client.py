@@ -85,6 +85,9 @@ def upload_call(
     audio_path: str,
     project_id: str | None = None,
     duration_sec: int | None = None,
+    ended_at: str | None = None,
+    app: str | None = None,
+    meeting_hint: str | None = None,
 ) -> dict[str, Any]:
     path = Path(audio_path)
     if not path.is_file():
@@ -102,6 +105,12 @@ def upload_call(
         data["project_id"] = project_id
     if duration_sec is not None:
         data["duration_sec"] = str(duration_sec)
+    if ended_at:
+        data["ended_at"] = ended_at
+    if app:
+        data["app"] = app
+    if meeting_hint:
+        data["meeting_hint"] = meeting_hint
 
     mime = _guess_mime(str(path))
     with path.open("rb") as audio_file:

@@ -82,8 +82,9 @@ class RecorderService:
         self._session_id = cmd.get("session_id") or str(uuid.uuid4())
         app = cmd.get("app", "Manual")
         matched = cmd.get("matched", [])
+        meeting_hint = cmd.get("meeting_hint")
         try:
-            path = self._capture.start(self._session_id, app, matched)
+            path = self._capture.start(self._session_id, app, matched, meeting_hint=meeting_hint)
             write_jsonl_line(
                 {
                     "type": "recording_started",
