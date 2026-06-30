@@ -94,6 +94,10 @@ def executable_name_matches(name: str | None) -> bool:
 
 
 def get_scoring_weights() -> dict[str, int]:
+    # macOS has no per-app WASAPI-style capture/render signal (see audio.probe_meeting_app_audio).
+    # Weights emphasize global mic+loopback, running/foreground apps, and title/browser context
+    # so desktop calls (Teams/Zoom) reach threshold 70 without Screen Recording, and browser
+    # meetings do when Screen Recording enables window titles.
     return {
         "mic_active": 30,
         "loopback_active": 25,

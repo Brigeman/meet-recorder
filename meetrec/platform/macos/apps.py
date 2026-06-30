@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import psutil
 
-from meetrec.detector.titles import match_in_call_title, match_title_hint
-
 PROCESS_TO_APP: dict[str, str] = {
     "zoom.us": "Zoom",
     "zoom": "Zoom",
     "microsoft teams": "Microsoft Teams",
     "teams": "Microsoft Teams",
+    "msteams": "Microsoft Teams",
     "slack": "Slack",
     "discord": "Discord",
     "telegram": "Telegram",

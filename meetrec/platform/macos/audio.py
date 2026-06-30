@@ -96,6 +96,8 @@ def probe_audio_activity() -> tuple[bool, bool]:
 
 
 def probe_meeting_app_audio(meeting_pids: set[int]) -> tuple[bool, bool, float, float]:
+    # Deferred: CoreAudio process taps / ScreenCaptureKit per-app audio are not implemented yet.
+    # Detection on macOS relies on global mic+loopback (probe_audio_activity) plus app/title context.
     _ = meeting_pids
     return False, False, 0.0, 0.0
 

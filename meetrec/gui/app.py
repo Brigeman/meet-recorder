@@ -19,6 +19,8 @@ from meetrec.gui.icons import app_ico_path, make_tray_icon
 from meetrec.gui.panel import FloatingPanel
 from meetrec.gui.prompt import MeetingPrompt
 from meetrec.gui.settings import SettingsWindow
+from meetrec.calls.projects import apply_session_project, default_project_id
+from meetrec.gui.project_picker import ProjectPickerDialog
 from meetrec.gui.setup_wizard import SetupWizard
 from meetrec.ipc.single_instance import acquire_single_instance, release_single_instance
 from meetrec.ipc.supervisor import ProcessSupervisor
@@ -54,6 +56,8 @@ class WinRecApp(ctk.CTk):
         self._last_context: str = ""
         self._last_app: str = ""
         self._last_level_ts = 0.0
+        self._session_project_id: str | None = None
+        self._pending_record: dict | None = None
 
         self._cooldown = CooldownManager(
             self._cfg.get("dismiss_cooldown_seconds", 90),
@@ -90,25 +94,37 @@ class WinRecApp(ctk.CTk):
 
     def _create_tray(self):
         try:
-            menu = pystray.Menu(
-                pystray.MenuItem(
-                    lambda _: "Stop recording" if self._recording else "Start recording",
-                    self._tray_toggle_record,
-                    default=True,
-                ),
-                pystray.MenuItem("Open recordings folder", self._tray_open_folder),
-                pystray.MenuItem("Settings", self._tray_settings),
-                pystray.Menu.SEPARATOR,
-                pystray.MenuItem("Quit", self._tray_quit),
-            )
-            self._tray_icon = pystray.Icon(
-                APP_NAME,
-                make_tray_icon(self._state),
-                APP_NAME,
-                menu,
-            )
-            # AppKit/NSApplication must run on the main thread (macOS 15+ crashes otherwise).
-            if sys.platform != "darwin":
+            if sys.platform == "darwin":
+                from meetrec.gui.tray_macos import MacOSTray
+
+                self._tray_icon = MacOSTray(
+                    self,
+                    APP_NAME,
+                    make_tray_icon(self._state),
+                    on_toggle_record=self._tray_toggle_record,
+                    on_open_folder=self._tray_open_folder,
+                    on_settings=self._tray_settings,
+                    on_quit=self._tray_quit,
+                    recording=self._recording,
+                )
+            else:
+                menu = pystray.Menu(
+                    pystray.MenuItem(
+                        lambda _: "Stop recording" if self._recording else "Start recording",
+                        self._tray_toggle_record,
+                        default=True,
+                    ),
+                    pystray.MenuItem("Open recordings folder", self._tray_open_folder),
+                    pystray.MenuItem("Settings", self._tray_settings),
+                    pystray.Menu.SEPARATOR,
+                    pystray.MenuItem("Quit", self._tray_quit),
+                )
+                self._tray_icon = pystray.Icon(
+                    APP_NAME,
+                    make_tray_icon(self._state),
+                    APP_NAME,
+                    menu,
+                )
                 threading.Thread(target=self._tray_icon.run, daemon=True).start()
         except Exception as exc:
             self._tray_icon = None
@@ -131,9 +147,12 @@ class WinRecApp(ctk.CTk):
             )
 
     def _update_tray_icon(self):
-        if self._tray_icon:
-            state = "recording" if self._recording else "monitoring"
-            self._tray_icon.icon = make_tray_icon(state)
+        if not self._tray_icon:
+            return
+        state = "recording" if self._recording else "monitoring"
+        self._tray_icon.icon = make_tray_icon(state)
+        if sys.platform == "darwin" and hasattr(self._tray_icon, "set_recording"):
+            self._tray_icon.set_recording(self._recording)
 
     def _notify_tray(self, title: str, message: str) -> None:
         if not self._tray_icon:
@@ -238,12 +257,18 @@ class WinRecApp(ctk.CTk):
             log.warning("upload_skipped reason=missing_audio")
             return
         try:
+            project_id = self._session_project_id
+            if project_id is None:
+                project_id = default_project_id(self._cfg)
             enqueue_upload(
                 audio_path=audio_path,
                 metadata=metadata or {},
-                project_id=self._cfg.get("calls_default_project_id"),
+                project_id=project_id,
                 api_base=self._cfg.get("calls_api_base_url", "https://calls.o2consult.ai"),
             )
+            if project_id:
+                self._cfg = apply_session_project(self._cfg, project_id)
+                save_config(self._cfg)
             if self._cfg.get("calls_device_token"):
                 self._notify_tray("Загрузка", "Отправка записи в Calls…")
             else:
@@ -252,7 +277,7 @@ class WinRecApp(ctk.CTk):
                     "Будет отправлена в Calls после подключения",
                 )
             self._upload_worker.enqueue_now()
-            log_event("upload_enqueued", audio_path=audio_path)
+            log_event("upload_enqueued", audio_path=audio_path, project_id=project_id)
         except Exception as exc:
             log.error("upload_enqueue_failed: %s", exc)
             self._notify_tray("Ошибка загрузки", "Не удалось поставить запись в очередь")
@@ -375,7 +400,42 @@ class WinRecApp(ctk.CTk):
         self._last_app = app
         meeting_hint = cand.get("context_key") or cand.get("window_title") or app
         self._pending_candidate = None
-        self._start_recording(app, cand.get("matched", []), meeting_hint=meeting_hint)
+        self._pending_record = {
+            "app": app,
+            "matched": cand.get("matched", []),
+            "meeting_hint": meeting_hint,
+        }
+        self._show_project_picker(self._begin_pending_record)
+
+    def _start_manual(self):
+        self._pending_record = {"app": "Manual", "matched": [], "meeting_hint": "Manual"}
+        self._show_project_picker(self._begin_pending_record)
+
+    def _show_project_picker(self, on_confirm):
+        if not self._cfg.get("calls_setup_completed") or not self._cfg.get("calls_device_token"):
+            on_confirm(default_project_id(self._cfg))
+            return
+
+        def _confirmed(project_id: str | None):
+            self._session_project_id = project_id
+            on_confirm(project_id)
+
+        def _cancelled():
+            self._pending_record = None
+
+        ProjectPickerDialog(self, self._cfg, _confirmed, on_cancel=_cancelled)
+
+    def _begin_pending_record(self, project_id: str | None):
+        pending = self._pending_record
+        self._pending_record = None
+        if not pending:
+            return
+        self._session_project_id = project_id
+        self._start_recording(
+            pending["app"],
+            pending.get("matched"),
+            meeting_hint=pending.get("meeting_hint"),
+        )
 
     def _start_recording(self, app: str, matched: list | None = None, meeting_hint: str | None = None):
         if self._recording:
@@ -395,9 +455,6 @@ class WinRecApp(ctk.CTk):
         if not self._recording:
             return
         self._recorder_sup.send_stdin({"command": "stop_recording"})
-
-    def _start_manual(self):
-        self._start_recording("Manual", [])
 
     def _tray_toggle_record(self, icon=None, item=None):
         if self._recording:
@@ -454,61 +511,6 @@ class WinRecApp(ctk.CTk):
             self._recorder_sup.stop()
 
 
-def _run_gui_macos() -> int:
-    """macOS: CTk in a worker thread, pystray/AppKit on the main thread."""
-    init_done = threading.Event()
-    tk_finished = threading.Event()
-    app_ref: list[WinRecApp] = []
-    init_error: list[BaseException] = []
-
-    def tk_worker():
-        try:
-            app = WinRecApp()
-            try:
-                app.iconbitmap(app_ico_path())
-            except Exception:
-                pass
-            app_ref.append(app)
-        except Exception as exc:
-            init_error.append(exc)
-        finally:
-            init_done.set()
-        if not app_ref:
-            tk_finished.set()
-            return
-        try:
-            app_ref[0].mainloop()
-        finally:
-            app_ref[0]._upload_worker.stop()
-            app_ref[0]._detector_sup.stop()
-            app_ref[0]._recorder_sup.stop()
-            tk_finished.set()
-
-    threading.Thread(target=tk_worker, daemon=True, name="tk").start()
-    if not init_done.wait(timeout=60):
-        log.error("GUI init timed out on macOS")
-        return 1
-    if init_error:
-        log.exception("GUI fatal: %s", init_error[0])
-        return 1
-    if not app_ref:
-        log.error("GUI init failed on macOS")
-        return 1
-
-    app = app_ref[0]
-    try:
-        if app._tray_icon:
-            app._tray_icon.run()
-        else:
-            tk_finished.wait()
-    finally:
-        if app._tray_icon:
-            app._tray_icon.stop()
-        app.after(0, app.destroy)
-        tk_finished.wait(timeout=5)
-    return 0
-
-
 def run_gui() -> int:
     log_path = setup_process_logging("gui")
     logging.getLogger(__name__).info("gui_log_file=%s", log_path)
@@ -519,8 +521,6 @@ def run_gui() -> int:
         return 1
     log_event("single_instance_acquired")
     try:
-        if sys.platform == "darwin":
-            return _run_gui_macos()
         app = WinRecApp()
         try:
             app.iconbitmap(app_ico_path())

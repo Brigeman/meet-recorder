@@ -30,6 +30,7 @@ a = Analysis(
         "psutil",
         "pystray",
         "pystray._darwin",
+        "objc",
         "Quartz",
         "AppKit",
         "CoreAudio",
