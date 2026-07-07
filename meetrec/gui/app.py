@@ -94,34 +94,7 @@ class WinRecApp(ctk.CTk):
         self._apply_autostart_policy()
         self._maybe_show_setup_wizard()
         self.after(50, self._pump_ui_queue)
-        if sys.platform == "darwin":
-            self.after(50, self._pump_cocoa_events)
         log_event("app_start", recordings_dir=self._cfg.get("recordings_dir"))
-
-    def _pump_cocoa_events(self) -> None:
-        """Keep NSStatusItem responsive while Tk owns the main loop."""
-        if sys.platform != "darwin":
-            return
-        try:
-            from AppKit import NSApp, NSDefaultRunLoopMode, NSDate, NSEventMaskAny
-
-            app = NSApp()
-            if app is not None:
-                until = NSDate.dateWithTimeIntervalSinceNow_(0)
-                while True:
-                    event = app.nextEventMatchingMask_untilDate_inMode_dequeue_(
-                        NSEventMaskAny, until, NSDefaultRunLoopMode, True
-                    )
-                    if event is None:
-                        break
-                    app.sendEvent_(event)
-        except Exception:
-            log.debug("cocoa_event_pump_failed", exc_info=True)
-        try:
-            if self.winfo_exists():
-                self.after(200, self._pump_cocoa_events)
-        except Exception:
-            pass
 
     def _post_to_ui(self, fn, /, *args, **kwargs) -> None:
         self._ui_queue.put((fn, args, kwargs))
