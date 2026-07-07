@@ -1,6 +1,6 @@
 [project]
 name = "desktop-meeting-recorder"
-version = "1.1.0"
+version = "1.1.2"
 description = "Desktop Meeting Recorder — prompt-before-record for Windows and macOS calls"
 readme = "README.md"
 requires-python = ">=3.10"
