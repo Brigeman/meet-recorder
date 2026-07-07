@@ -1,4 +1,4 @@
-"""Shared glass-style floating windows."""
+"""Shared glass-style floating windows (Windows Tk panel/prompt)."""
 
 import tkinter as tk
 

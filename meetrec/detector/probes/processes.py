@@ -21,6 +21,13 @@ def probe_running_apps() -> set[str]:
     cfg = load_config()
     supported = cfg.get("supported_apps", {})
     running = list_running_meeting_apps()
+    return filter_running_apps(running, supported)
+
+
+def filter_running_apps(running: set[str], supported: dict | None = None) -> set[str]:
+    if supported is None:
+        cfg = load_config()
+        supported = cfg.get("supported_apps", {})
     return {app for app in running if _is_enabled(app, supported)}
 
 

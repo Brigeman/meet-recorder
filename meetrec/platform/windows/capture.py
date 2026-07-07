@@ -17,7 +17,14 @@ import imageio_ffmpeg
 import numpy as np
 import pyaudiowpatch as pyaudio
 
-from meetrec.recorder.audio_mix import interleave_stereo, mix_mono, peak_level, resample, to_mono
+from meetrec.recorder.audio_mix import (
+    BleedCancelState,
+    interleave_stereo,
+    mix_mono,
+    peak_level,
+    resample,
+    to_mono,
+)
 from meetrec.platform.windows.devices import (
     default_input_key,
     default_output_key,
@@ -81,6 +88,12 @@ class AudioCapture:
         self._peak = 0.0
         self._peak_lock = threading.Lock()
         self._on_peak = None
+        self._bleed_state = BleedCancelState(sample_rate=48000)
+
+    def _use_speaker_separation(self) -> bool:
+        if self._settings.get("speaker_separation", True):
+            return True
+        return bool(self._settings.get("dual_track_recording", False))
 
     def update_settings(self, settings: dict) -> None:
         self._settings = settings
@@ -134,18 +147,20 @@ class AudioCapture:
             "meeting_hint": (meeting_hint or "").strip() or None,
             "user_confirmed": True,
             "audio_file": self._output_path,
-            "dual_track": bool(self._settings.get("dual_track_recording", False)),
+            "dual_track": self._use_speaker_separation(),
+            "speaker_separation": self._use_speaker_separation(),
             "devices_used": [],
             "device_switches": [],
         }
         self._stop_event.clear()
         self._file_closed.clear()
+        self._bleed_state = BleedCancelState(sample_rate=48000)
         self._thread = threading.Thread(target=self._record_loop, daemon=True)
         self._thread.start()
         log.info("Recording started -> %s", self._output_path)
         return self._output_path
 
-    def stop(self) -> dict:
+    def stop(self, *, defer_export: bool = False) -> dict:
         if not self.is_recording:
             return self.metadata
         self._stop_event.set()
@@ -153,13 +168,29 @@ class AudioCapture:
         self._thread.join(timeout=5)
         self._thread = None
         self._metadata["ended_at"] = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-        self._write_metadata_json()
+        if not defer_export:
+            self.finalize_export()
+        else:
+            self._write_metadata_json()
+        log.info("Recording stopped -> %s", self._output_path)
+        return self.metadata
 
+    def finalize_export(self) -> None:
+        """Build speaker tracks / mixed primary and optional format conversion."""
+        wav_for_export = self._output_path
+        if wav_for_export and self._use_speaker_separation():
+            from meetrec.recorder.speaker_tracks import finalize_recording_metadata
+
+            finalize_recording_metadata(
+                self._metadata,
+                wav_for_export,
+                enabled=True,
+            )
+        self._write_metadata_json()
         fmt = self._settings.get("audio_format", "wav")
         if fmt != "wav":
             self._convert(fmt)
-        log.info("Recording stopped -> %s", self._output_path)
-        return self.metadata
+            self._write_metadata_json()
 
     def _write_metadata_json(self) -> None:
         if not self._output_path:
@@ -340,10 +371,20 @@ class AudioCapture:
         else:
             mic_arr = np.zeros(target_len, dtype=np.int16)
 
+        echo_on = self._settings.get("echo_cancellation", True)
         if dual_track:
             out = interleave_stereo(lb_arr, mic_arr)
         else:
-            out = mix_mono(lb_arr, mic_arr)
+            gain, lag, corr = (0.0, 0, 0.0)
+            if echo_on:
+                gain, lag, corr = self._bleed_state.update(lb_arr, mic_arr)
+            out = mix_mono(
+                lb_arr,
+                mic_arr,
+                bleed_gain=gain,
+                lag_samples=lag,
+                bleed_corr=corr,
+            )
         self._update_peak(out)
         return out
 
@@ -351,7 +392,7 @@ class AudioCapture:
         wf = None
         bundle: StreamBundle | None = None
         last_device_check = 0.0
-        dual_track = bool(self._settings.get("dual_track_recording", False))
+        dual_track = self._use_speaker_separation()
         file_rate = 48000
 
         try:

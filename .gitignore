@@ -2,10 +2,12 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .venv/
+.venv-build/
 dist/
 *.dmg
 *.ico
 .claude/
+.DS_Store
 
 # PyInstaller build artifacts
 build/winrec/
@@ -19,5 +21,6 @@ build/**/xref-*.html
 build/**/PYZ-*.pyz
 build/**/base_library.zip
 
-# macOS system-audio helper (built in CI / locally)
+# macOS audio helpers (built in CI / locally)
 meetrec/platform/macos/helper/MeetRecSystemAudio
+meetrec/platform/macos/helper/MeetRecVoiceMic

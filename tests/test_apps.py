@@ -17,7 +17,8 @@ def test_title_hint_zoom():
 
 
 def test_title_hint_meet():
-    assert match_title_hint("Meet - abc-defg-hij") == "Google Meet"
+    assert match_title_hint("Google Meet - abc-defg-hij") == "Google Meet"
+    assert match_title_hint("Meet - abc-defg-hij") is None
 
 
 def test_webview2_function_exists():

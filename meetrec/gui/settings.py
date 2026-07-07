@@ -1,11 +1,14 @@
 """Settings window."""
 
 import os
+import sys
+import webbrowser
 from tkinter import filedialog
 
 import customtkinter as ctk
 
 from meetrec import autostart
+from meetrec.calls.pairing import PairingError, apply_pairing_to_config
 from meetrec.config import AUDIO_FORMATS, save_config
 from meetrec.gui.theme import (
     ACCENT_PRIMARY,
@@ -22,13 +25,24 @@ from meetrec.gui.theme import (
 
 
 class SettingsWindow(ctk.CTkToplevel):
-    def __init__(self, master, config: dict, on_save, on_reset_pairing=None):
+    def __init__(
+        self,
+        master,
+        config: dict,
+        on_save,
+        on_reset_pairing=None,
+        on_pairing_complete=None,
+    ):
         super().__init__(master)
         self._cfg = dict(config)
         self._on_save = on_save
         self._on_reset_pairing = on_reset_pairing
+        self._on_pairing_complete = on_pairing_complete
+        self._paired = bool(
+            self._cfg.get("calls_setup_completed") and self._cfg.get("calls_device_token")
+        )
         self.title("Settings")
-        self.geometry("420x430")
+        self.geometry("420x520" if not self._paired else "420x430")
         self.resizable(False, False)
         self.configure(fg_color=BG_DARK)
         self._build()
@@ -120,7 +134,7 @@ class SettingsWindow(ctk.CTkToplevel):
         calls_frame.grid(row=7, column=1, padx=(0, 12), pady=(8, 6), sticky="ew")
         calls_frame.grid_columnconfigure(0, weight=1)
 
-        if self._cfg.get("calls_setup_completed") and self._cfg.get("calls_device_token"):
+        if self._paired:
             status = "ПК уже привязан к Calls"
         elif self._cfg.get("calls_setup_skipped"):
             status = "Calls не подключён"
@@ -133,7 +147,66 @@ class SettingsWindow(ctk.CTkToplevel):
             text_color=TEXT_PRIMARY,
             anchor="w",
         ).grid(row=0, column=0, sticky="w")
-        if self._on_reset_pairing:
+
+        next_row = 1
+        if not self._paired:
+            ctk.CTkLabel(
+                calls_frame,
+                text=(
+                    "1. calls.o2consult.ai → Настройки → Подключить ПК\n"
+                    "2. Сгенерируйте код и вставьте ниже"
+                ),
+                font=("Segoe UI", 9),
+                text_color=TEXT_SECONDARY,
+                justify="left",
+                anchor="w",
+            ).grid(row=next_row, column=0, pady=(6, 4), sticky="w")
+            next_row += 1
+
+            ctk.CTkButton(
+                calls_frame,
+                text="Открыть Calls в браузере",
+                command=self._open_calls_settings,
+                height=28,
+                fg_color=BG_CONTROL,
+                hover_color=BG_CONTROL_HOVER,
+                text_color=TEXT_PRIMARY,
+            ).grid(row=next_row, column=0, pady=(0, 6), sticky="ew")
+            next_row += 1
+
+            self._pairing_code_var = ctk.StringVar()
+            ctk.CTkEntry(
+                calls_frame,
+                textvariable=self._pairing_code_var,
+                placeholder_text="v1.…",
+                height=28,
+                font=("Segoe UI", 10),
+                fg_color=BG_INPUT,
+            ).grid(row=next_row, column=0, pady=(0, 6), sticky="ew")
+            next_row += 1
+
+            self._pairing_error_label = ctk.CTkLabel(
+                calls_frame,
+                text="",
+                font=("Segoe UI", 9),
+                text_color="#f87171",
+                anchor="w",
+                justify="left",
+            )
+            self._pairing_error_label.grid(row=next_row, column=0, pady=(0, 4), sticky="w")
+            next_row += 1
+
+            ctk.CTkButton(
+                calls_frame,
+                text="Подключить",
+                command=self._connect_calls,
+                height=28,
+                fg_color=ACCENT_PRIMARY,
+                hover_color=ACCENT_PRIMARY_HOVER,
+            ).grid(row=next_row, column=0, pady=(0, 4), sticky="ew")
+            next_row += 1
+
+        if self._paired and self._on_reset_pairing:
             ctk.CTkButton(
                 calls_frame,
                 text="Сбросить / переподключить",
@@ -142,7 +215,7 @@ class SettingsWindow(ctk.CTkToplevel):
                 fg_color=BG_CONTROL,
                 hover_color=BG_CONTROL_HOVER,
                 text_color=TEXT_PRIMARY,
-            ).grid(row=1, column=0, pady=(6, 0), sticky="w")
+            ).grid(row=next_row, column=0, pady=(6, 0), sticky="w")
 
         ctk.CTkButton(
             self, text="Save", command=self._save,
@@ -154,9 +227,30 @@ class SettingsWindow(ctk.CTkToplevel):
         if path:
             self._path_var.set(path)
 
+    def _open_calls_settings(self):
+        webbrowser.open("https://calls.o2consult.ai/settings")
+
+    def _connect_calls(self):
+        code = self._pairing_code_var.get().strip()
+        if not code:
+            self._pairing_error_label.configure(text="Вставьте код подключения")
+            return
+        try:
+            self._cfg = apply_pairing_to_config(self._cfg, code)
+        except PairingError as exc:
+            self._pairing_error_label.configure(text=str(exc))
+            return
+
+        self._pairing_error_label.configure(text="")
+        save_config(self._cfg)
+        self._on_save(self._cfg)
+        if self._on_pairing_complete:
+            self._on_pairing_complete(self._cfg)
+        self.destroy()
+
     def _reset_pairing(self):
         if self._on_reset_pairing:
-            self._on_reset_pairing()
+            self._on_reset_pairing(reopen_settings=sys.platform == "darwin")
         self.destroy()
 
     def _save(self):

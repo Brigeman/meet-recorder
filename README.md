@@ -1,22 +1,41 @@
 # Desktop Meeting Recorder
 
-Windows desktop app that detects likely meeting starts and asks whether to record — **never auto-records**.
+Desktop app that detects likely meeting starts and asks whether to record — **never auto-records**.
 
-When signals suggest a call (Teams, Zoom, Meet in browser, etc.), a compact glass-style prompt appears. Recording starts only after you click **Записать**. A floating capsule panel shows timer, mini waveform, and **Stop**.
+When signals suggest a call (Teams, Zoom, Meet in browser, etc.), a compact prompt appears. Recording starts only after you click **Записать**. A floating panel shows timer, mini waveform, and **Stop**.
+
+**Platforms:** Windows 10/11 and macOS 13+ (Apple Silicon).
 
 ## Features
 
 - Prompt-before-record (no silent auto-start)
 - Multi-process architecture: GUI, detector, recorder (crash isolation)
 - Audio-first + context scoring (mic, loopback, apps, browser meetings)
-- Glass meeting prompt (320×92) and floating panel (360×48)
-- Dual capture: system loopback + microphone → mixed WAV
+- Dual capture: system audio + microphone → mixed WAV
 - Optional MP3/M4A/FLAC/… via FFmpeg
 - Sidecar JSON metadata per recording
-- System tray: Start/Stop, Open folder, Settings, Quit
+- Menu bar / system tray controls
 - GitHub Release builds on tag push (`v*`)
 
-## Quick Start
+## macOS — установка
+
+> Полная инструкция: **[docs/macos-setup.md](docs/macos-setup.md)**
+
+1. Скачайте **`DesktopMeetingRecorder-vX.Y.Z-macos.dmg`** из [Releases](https://github.com/Brigeman/meet-recorder/releases).
+2. Откройте DMG → дважды кликните **`Install.command`** (или перетащите `.app` в **Applications**).
+3. Если macOS блокирует — снимите карантин:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Desktop Meeting Recorder.app"
+open "/Applications/Desktop Meeting Recorder.app"
+```
+
+4. Разрешите **Микрофон**, **Запись экрана** и **Универсальный доступ**.
+5. Иконка появится в **строке меню** (в Dock приложения нет).
+
+**Не запускайте `.app` прямо из DMG** — сначала скопируйте в Applications.
+
+## Windows — Quick Start
 
 ```bat
 start.bat
@@ -40,84 +59,70 @@ python -m winrec recorder
 
 ## Requirements
 
-- Windows 10/11
-- Python 3.10+ (3.12 recommended)
+- **Windows:** 10/11, Python 3.10+ (3.12 recommended)
+- **macOS:** 13+ (Ventura), Apple Silicon, Python 3.12 for dev builds
 
 ## Configuration
 
-`%APPDATA%\Desktop Meeting Recorder\config.json`
+- **Windows:** `%APPDATA%\Desktop Meeting Recorder\config.json`
+- **macOS:** `~/Library/Application Support/Desktop Meeting Recorder/config.json`
 
-- `prompt_threshold` (default 70)
-- `web_sustain_seconds` / `desktop_sustain_seconds`
-- `dismiss_cooldown_seconds` / `post_stop_cooldown_seconds`
-- `recordings_dir`, `audio_format`, per-app toggles
+Common keys: `prompt_threshold`, cooldowns, `recordings_dir`, `audio_format`, per-app toggles.
 
 ## Releases
 
-Push a tag to trigger CI:
+Push a tag to trigger CI (macOS DMG; Windows job can be re-enabled in workflow when needed):
 
-```bat
-git tag v1.0.0
-git push origin v1.0.0
+```bash
+git tag v1.1.0
+git push origin v1.1.0
 ```
 
-Artifacts: zip on GitHub Releases containing **three exe in one folder**:
+| Platform | Artifact |
+|----------|----------|
+| macOS | `DesktopMeetingRecorder-vX.Y.Z-macos.dmg` |
+| Windows | `DesktopMeetingRecorder-vX.Y.Z-win64.zip` (last release with Windows build) |
 
-| File | Role |
-|------|------|
-| `WinRec.exe` | Main app (tray) — **launch this** |
-| `WinRec.Detector.exe` | Started automatically by GUI |
-| `WinRec.Recorder.exe` | Started automatically by GUI |
-
-Unpack the zip, keep all three files together, double-click `WinRec.exe`.
+Windows zip contains three exe in one folder — launch **`WinRec.exe`**.
 
 ## Logs
 
-All processes write daily logs under your recordings folder:
-
 ```text
 {recordings_dir}/logs/
-  winrec-gui-2026-05-15.log
-  winrec-detector-2026-05-15.log
-  winrec-recorder-2026-05-15.log
+  meetrec-gui-YYYY-MM-DD.log
+  meetrec-detector-YYYY-MM-DD.log
+  meetrec-recorder-YYYY-MM-DD.log
 ```
 
-Use **detector** log to see `detector_tick` (score, matched signals, sustain) and `prompt_skipped` in **gui** log when a notification was blocked.
+## Development
 
-### First release checklist
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
 
-1. Create a GitHub repository and push the code (this folder is not a git repo until you run `git init`).
-2. Tag and push: `git tag v1.0.0 && git push origin v1.0.0`
-3. Open **Actions** → wait for `Release` workflow (tests + Windows build).
-4. Download `DesktopMeetingRecorder-v1.0.0-win64.zip` from **Releases**.
+macOS helpers:
 
-Windows may show SmartScreen (unsigned build) — choose “Run anyway” for internal testing.
+```bash
+bash meetrec/platform/macos/helper/build.sh
+./start.sh
+```
 
 ## Project layout
 
 ```text
-meet recorder/
-  winrec/                 # application package (only source tree)
-    gui/                  # tray, glass prompt, floating panel, settings
-    detector/             # detector service + probes + scoring
-    recorder/             # recorder service + WASAPI capture
-    ipc/                  # JSONL protocol, subprocess supervisor
-    config.py
-    __main__.py           # python -m winrec
-  tests/
-  main.py                 # thin entry → winrec
-  start.bat
-  build/winrec.spec
-  .github/workflows/
-```
-
-There is **no** separate top-level `recorder/` or `ui/` — those were legacy Ghost Meet Recorder modules, now removed.
-
-## Development
-
-```bat
-pip install -r requirements-dev.txt
-pytest
+meetrec/                  # main package (Windows + macOS)
+  gui/                      # tray, prompts, panel, settings
+  detector/                 # detector service + probes + scoring
+  recorder/                 # recorder service + capture
+  platform/                 # windows/ and macos/ adapters
+  ipc/
+winrec/                     # backward-compat shim → meetrec
+tests/
+build/macrec.spec           # macOS .app bundle
+build/meetrec.spec          # Windows exe bundle
+.github/workflows/release.yml
+docs/macos-setup.md
 ```
 
 ## License

@@ -90,6 +90,8 @@ def app_icon_path(resources_dir: str) -> str:
 
 def executable_name_matches(name: str | None) -> bool:
     lowered = (name or "").lower()
+    if getattr(sys, "frozen", False):
+        return "meetrec" in lowered
     return "meetrec" in lowered or "python" in lowered
 
 

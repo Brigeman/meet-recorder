@@ -30,26 +30,25 @@ def probe_foreground() -> tuple[str | None, str]:
     pid = int(front.processIdentifier())
     app_name = str(front.localizedName() or "")
     title = _front_window_title(pid)
-    app = resolve_app_for_pid(pid) or match_title_hint(title) or (app_name or None)
+    from meetrec.platform.macos.apps import resolve_bundle_id, resolve_localized_name
+
+    bundle_id = str(front.bundleIdentifier() or "")
+    app = (
+        resolve_app_for_pid(pid)
+        or resolve_bundle_id(bundle_id)
+        or resolve_localized_name(app_name)
+        or match_title_hint(title)
+        or (app_name or None)
+    )
     return app, title
 
 
 def _front_window_title(pid: int) -> str:
-    try:
-        from Quartz import (
-            CGWindowListCopyWindowInfo,
-            kCGNullWindowID,
-            kCGWindowListExcludeDesktopElements,
-            kCGWindowListOptionOnScreenOnly,
-        )
-    except ImportError:
-        return ""
+    from meetrec.platform.macos.windows import get_on_screen_windows
 
-    options = kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements
-    windows = CGWindowListCopyWindowInfo(options, kCGNullWindowID) or []
     best = ""
     best_layer = 10_000
-    for window in windows:
+    for window in get_on_screen_windows():
         try:
             owner_pid = int(window.get("kCGWindowOwnerPID", -1))
             if owner_pid != pid:

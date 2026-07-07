@@ -17,8 +17,8 @@ from meetrec.detector.probes import (
     probe_browser_meeting,
     probe_foreground,
     probe_meeting_app_network,
-    probe_running_apps,
 )
+from meetrec.detector.probes.processes import filter_running_apps
 from meetrec.platform import probe_meeting_app_audio
 from meetrec.detector.scoring import (
     AudioStreakTracker,
@@ -37,6 +37,8 @@ log = logging.getLogger(__name__)
 def collect_snapshot(enable_network_probe: bool = True) -> SignalSnapshot:
     meeting_pids_map = list_running_meeting_pids()
     meeting_pids = {pid for pids in meeting_pids_map.values() for pid in pids}
+    cfg = load_config()
+    apps_running = filter_running_apps(set(meeting_pids_map.keys()), cfg.get("supported_apps", {}))
     mic_peak_active, loopback_peak_active = probe_audio_activity()
     app_cap_active, app_ren_active, cap_peak, ren_peak = probe_meeting_app_audio(meeting_pids)
     if enable_network_probe:
@@ -45,9 +47,28 @@ def collect_snapshot(enable_network_probe: bool = True) -> SignalSnapshot:
         net_active, net_count, net_pid = False, 0, None
     browser_meeting, browser_app, browser_tab, browser_pid = probe_browser_meeting()
     fg_app, window_title = probe_foreground()
-    apps_running = probe_running_apps()
     title = window_title or browser_tab
     in_call_app, in_call = match_in_call_title(title)
+    if sys.platform == "darwin":
+        from meetrec.platform.macos.apps import DESKTOP_MEETING_APPS, resolve_app_for_pid
+        from meetrec.platform.macos.audio import probe_meeting_audio_devices
+        from meetrec.platform.macos.call_state import probe_meeting_window_context
+
+        virtual_audio_app = probe_meeting_audio_devices()
+        window_app, window_title_extra, window_in_call = probe_meeting_window_context()
+        if window_in_call and window_app:
+            in_call_app, in_call = window_app, True
+            title = title or window_title_extra
+        elif not in_call and virtual_audio_app:
+            in_call_app, in_call = virtual_audio_app, True
+        elif not in_call and mic_peak_active and fg_app in DESKTOP_MEETING_APPS:
+            in_call_app, in_call = fg_app, True
+        elif not in_call and mic_peak_active and net_active and net_pid:
+            net_app = resolve_app_for_pid(net_pid)
+            if net_app in DESKTOP_MEETING_APPS:
+                in_call_app, in_call = net_app, True
+        elif not in_call and mic_peak_active and browser_meeting and browser_app:
+            in_call_app, in_call = browser_app, True
     title_hint = None if in_call else match_title_hint(title)
 
     snap = SignalSnapshot(
@@ -58,7 +79,7 @@ def collect_snapshot(enable_network_probe: bool = True) -> SignalSnapshot:
         meeting_network_active=net_active,
         meeting_network_count=net_count,
         apps_running=apps_running,
-        foreground_app=fg_app if fg_app and fg_app in apps_running.union({fg_app}) else fg_app,
+        foreground_app=fg_app,
         title_hint_app=title_hint,
         in_call_title_app=in_call_app if in_call else None,
         browser_meeting=browser_meeting,
@@ -67,8 +88,6 @@ def collect_snapshot(enable_network_probe: bool = True) -> SignalSnapshot:
         browser_pid=browser_pid or (net_pid or 0),
         window_title=title,
     )
-    if fg_app and fg_app not in snap.apps_running:
-        snap.apps_running = apps_running | {fg_app}
     setattr(snap, "_debug_cap_peak", cap_peak)
     setattr(snap, "_debug_ren_peak", ren_peak)
     setattr(snap, "_debug_pids", meeting_pids_map)
@@ -92,6 +111,11 @@ def run_detector() -> None:
     )
     audio_streak_tracker = AudioStreakTracker(threshold_seconds=audio_streak_threshold)
     trace = os.environ.get("MEETREC_DETECTOR_TRACE", "").strip() == "1"
+    poll_interval = 2.5 if sys.platform == "darwin" else POLL_INTERVAL
+    if sys.platform == "darwin":
+        from meetrec.platform.macos.audio import warmup_audio_probes
+
+        warmup_audio_probes()
     log_event(
         "detector_started",
         threshold=threshold,
@@ -125,8 +149,8 @@ def run_detector() -> None:
             required_sustain = tracker.required_for(snap)
             log.info(
                 "detector_tick score=%s threshold=%s sustained=%s sustain=%.1f/%.1f "
-                "app=%s in_call=%s net=%s(%s) audio_app=cap:%s/ren:%s streak=%.1f/%.1f "
-                "peaks=%.3f/%.3f "
+                "app=%s in_call=%s net=%s(%s) mic=%s audio_app=cap:%s/ren:%s streak=%.1f/%.1f "
+                "peaks=%.3f/%.3f apps=%s "
                 "matched=%s context_key=%s",
                 score,
                 threshold,
@@ -137,12 +161,14 @@ def run_detector() -> None:
                 bool(snap.in_call_title_app),
                 snap.meeting_network_active,
                 snap.meeting_network_count,
+                snap.mic_active,
                 snap.meeting_capture_active,
                 snap.meeting_render_active,
                 cap_streak,
                 ren_streak,
                 getattr(snap, "_debug_cap_peak", 0.0),
                 getattr(snap, "_debug_ren_peak", 0.0),
+                ",".join(sorted(snap.apps_running)) or "-",
                 ",".join(matched) or "-",
                 ctx,
             )
@@ -182,10 +208,13 @@ def run_detector() -> None:
             log.error("detector loop error: %s", e)
             write_jsonl_line({"type": "error", "message": str(e), "timestamp": time.time()})
 
-        time.sleep(POLL_INTERVAL)
+        time.sleep(poll_interval)
 
 
 def main() -> None:
+    from meetrec.ipc.worker_guard import start_parent_watchdog
+
+    start_parent_watchdog()
     try:
         run_detector()
     except KeyboardInterrupt:

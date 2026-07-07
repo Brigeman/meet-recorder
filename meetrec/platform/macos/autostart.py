@@ -51,7 +51,7 @@ def enable(executable: str | None = None) -> bool:
         "Label": AUTOSTART_LABEL,
         "ProgramArguments": [exe],
         "RunAtLoad": True,
-        "KeepAlive": False,
+        "KeepAlive": {"SuccessfulExit": False},
     }
     try:
         with open(PLIST_PATH, "wb") as f:

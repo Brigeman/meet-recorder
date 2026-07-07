@@ -1,4 +1,4 @@
-"""Floating recording capsule — modern accent style."""
+"""Floating recording capsule — modern accent style (Windows)."""
 
 import time
 
@@ -6,6 +6,7 @@ import customtkinter as ctk
 
 from meetrec.gui.icons import load_logo_image
 from meetrec.gui.glass import GlassWindow
+from meetrec.logging_util import log_event
 from meetrec.gui.theme import (
     ACCENT_REC,
     ACCENT_REC_HOVER,
@@ -24,11 +25,11 @@ from meetrec.gui.waveform import MiniWaveform
 
 class FloatingPanel(GlassWindow):
     def __init__(self, master, on_stop, on_start):
-        # Solid window (no alpha) — much smoother on Windows.
         super().__init__(master, PANEL_W, PANEL_H, corner_radius=28, use_alpha=False)
         self._on_stop = on_stop
         self._on_start = on_start
         self._recording = False
+        self._stopping = False
         self._visible = False
         self._start_ts: float | None = None
         self._timer_job = None
@@ -82,30 +83,61 @@ class FloatingPanel(GlassWindow):
         )
         self._action_btn.grid(row=0, column=3, padx=(10, 14))
 
+        self._outer.unbind("<ButtonPress-1>")
+        self._outer.unbind("<B1-Motion>")
+        self._content.unbind("<ButtonPress-1>")
+        self._content.unbind("<B1-Motion>")
+        for handle in (self._logo, self._rec_dot, self._timer, self._wave):
+            handle.bind("<ButtonPress-1>", self._start_drag)
+            handle.bind("<B1-Motion>", self._on_drag)
+
+        self.bind("<Escape>", self._on_escape)
+
+    def _on_escape(self, _event=None):
+        if self._recording:
+            log_event("stop_clicked", source="escape")
+            self._on_stop()
+
     def show_recording(self) -> None:
+        self._stopping = False
         self._recording = True
         self._visible = True
         self._start_ts = time.time()
         self._rec_dot.configure(fg_color=ACCENT_REC)
-        self._action_btn.configure(text="Stop")
-        self._action_btn.configure(fg_color=BTN_STOP, hover_color=BTN_STOP_HOVER)
+        self._action_btn.configure(
+            text="Stop", fg_color=BTN_STOP, hover_color=BTN_STOP_HOVER, state="normal"
+        )
         self.show_animated()
         self._tick_timer()
         self._tick_pulse()
 
     def show_idle_ready(self) -> None:
+        self._stopping = False
         self._recording = False
         self._visible = True
         self._start_ts = None
         self._rec_dot.configure(fg_color=STATE_COLORS["idle"])
         self._timer.configure(text="00:00")
-        self._action_btn.configure(text="Start")
-        self._action_btn.configure(fg_color=BTN_PRIMARY, hover_color=BTN_PRIMARY_HOVER)
+        self._action_btn.configure(
+            text="Start", fg_color=BTN_PRIMARY, hover_color=BTN_PRIMARY_HOVER, state="normal"
+        )
         self.show_animated()
         self._cancel_timer()
         self._cancel_pulse()
 
+    def show_stopping(self) -> None:
+        self._stopping = True
+        self._recording = False
+        self._visible = False
+        self._start_ts = None
+        self._cancel_timer()
+        self._cancel_pulse()
+        self._action_btn.configure(text="Stopping…", state="disabled")
+        self.hide_window()
+        log_event("panel_stopping")
+
     def hide_panel(self) -> None:
+        self._stopping = False
         self._visible = False
         self._cancel_timer()
         self._cancel_pulse()
@@ -116,9 +148,13 @@ class FloatingPanel(GlassWindow):
             self._wave.set_peak(peak)
 
     def _action(self):
+        if self._stopping:
+            return
         if self._recording:
+            log_event("stop_clicked", source="panel_button")
             self._on_stop()
         else:
+            log_event("start_clicked", source="panel_button")
             self._on_start()
 
     def _tick_timer(self):

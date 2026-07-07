@@ -5,6 +5,17 @@ import time
 from dataclasses import dataclass, field
 
 from meetrec.detector.titles import match_title_hint as apps_match_title_hint
+
+_BROWSER_APPS = {
+    "Google Chrome",
+    "Microsoft Edge",
+    "Firefox",
+    "Brave",
+    "Opera",
+    "Safari",
+}
+
+
 def _weights() -> dict[str, int]:
     from meetrec.platform import get_scoring_weights
 
@@ -40,6 +51,45 @@ def _allow_meeting_audio_signal(
     return streak >= threshold
 
 
+def _foreground_is_meeting_app(snapshot: SignalSnapshot) -> bool:
+    fg = snapshot.foreground_app
+    if not fg:
+        return False
+    if fg in _BROWSER_APPS:
+        return snapshot.browser_meeting or bool(snapshot.title_hint_app) or bool(
+            snapshot.in_call_title_app
+        )
+    return fg in snapshot.apps_running
+
+
+def _network_counts(snapshot: SignalSnapshot) -> bool:
+    """Background Teams/Zoom sockets are common while idle; require call context."""
+    if not snapshot.meeting_network_active:
+        return False
+    return bool(snapshot.mic_active or snapshot.in_call_title_app)
+
+
+def _browser_meeting_counts(snapshot: SignalSnapshot) -> bool:
+    """An open tab title alone is not a call; require mic or strict in-call title."""
+    if not snapshot.browser_meeting:
+        return False
+    return bool(snapshot.mic_active or snapshot.in_call_title_app)
+
+
+def _loopback_counts(snapshot: SignalSnapshot) -> bool:
+    """System audio playing (music/video) is not a meeting signal by itself."""
+    if not snapshot.loopback_active:
+        return False
+    return bool(
+        snapshot.mic_active
+        or snapshot.in_call_title_app
+        or _browser_meeting_counts(snapshot)
+        or snapshot.meeting_capture_active
+        or snapshot.meeting_render_active
+        or _network_counts(snapshot)
+    )
+
+
 def compute_matched(
     snapshot: SignalSnapshot,
     *,
@@ -50,7 +100,7 @@ def compute_matched(
     matched = []
     if snapshot.mic_active:
         matched.append("mic_active")
-    if snapshot.loopback_active:
+    if _loopback_counts(snapshot):
         matched.append("loopback_active")
     if snapshot.meeting_capture_active and _allow_meeting_audio_signal(
         snapshot,
@@ -64,17 +114,17 @@ def compute_matched(
         audio_streak_threshold,
     ):
         matched.append("meeting_app_render_active")
-    if snapshot.meeting_network_active:
+    if _network_counts(snapshot):
         matched.append("meeting_app_network_active")
     if snapshot.apps_running:
         matched.append("known_meeting_app_running")
-    if snapshot.foreground_app:
+    if _foreground_is_meeting_app(snapshot):
         matched.append("known_meeting_app_foreground")
     if snapshot.in_call_title_app:
         matched.append("in_call_title")
     elif snapshot.title_hint_app:
         matched.append("title_hint")
-    if snapshot.browser_meeting:
+    if _browser_meeting_counts(snapshot):
         matched.append("browser_meeting_context")
     return matched
 
@@ -90,7 +140,7 @@ def compute_score(
     score = 0
     if snapshot.mic_active:
         score += weights["mic_active"]
-    if snapshot.loopback_active:
+    if _loopback_counts(snapshot):
         score += weights["loopback_active"]
     if snapshot.meeting_capture_active and _allow_meeting_audio_signal(
         snapshot,
@@ -104,28 +154,28 @@ def compute_score(
         audio_streak_threshold,
     ):
         score += weights["meeting_app_render_active"]
-    if snapshot.meeting_network_active:
+    if _network_counts(snapshot):
         score += weights["meeting_app_network_active"]
     if snapshot.apps_running:
         score += weights["known_meeting_app_running"]
-    if snapshot.foreground_app:
+    if _foreground_is_meeting_app(snapshot):
         score += weights["known_meeting_app_foreground"]
     if snapshot.in_call_title_app:
         score += weights["in_call_title"]
     elif snapshot.title_hint_app:
         score += weights["title_hint"]
-    if snapshot.browser_meeting:
+    if _browser_meeting_counts(snapshot):
         score += weights["browser_meeting_context"]
     return score
 
 
 def primary_app(snapshot: SignalSnapshot) -> str:
+    if snapshot.in_call_title_app:
+        return snapshot.in_call_title_app
     if snapshot.browser_meeting and snapshot.browser_app:
         return snapshot.browser_app
     if snapshot.foreground_app:
         return snapshot.foreground_app
-    if snapshot.in_call_title_app:
-        return snapshot.in_call_title_app
     if snapshot.title_hint_app:
         return snapshot.title_hint_app
     if snapshot.apps_running:
@@ -184,7 +234,11 @@ class SustainTracker:
     _last_key: str | None = None
 
     def required_for(self, snapshot: SignalSnapshot) -> float:
-        strong_desktop = snapshot.meeting_capture_active or snapshot.meeting_network_active
+        strong_desktop = (
+            snapshot.meeting_capture_active
+            or _network_counts(snapshot)
+            or bool(snapshot.in_call_title_app)
+        )
         if is_web_context(snapshot):
             return self.web_sustain
         if strong_desktop:

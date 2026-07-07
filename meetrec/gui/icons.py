@@ -31,12 +31,45 @@ def load_logo_image(size: int = 64) -> Image.Image:
     if size in _ICON_CACHE:
         return _ICON_CACHE[size].copy()
     logo = Image.open(_resource_dir() / "logo.png").convert("RGBA")
+    bbox = logo.getbbox()
+    if bbox:
+        logo = logo.crop(bbox)
     scaled = logo.resize((size, size), Image.LANCZOS)
     _ICON_CACHE[size] = scaled
     return scaled.copy()
 
 
+def make_menu_bar_icon(state: str, size: int = 18) -> Image.Image:
+    """High-contrast tray icon — the full logo is faint when shrunk to menu-bar size."""
+    src = load_logo_image(size=max(size * 4, 64))
+    rgba = src.convert("RGBA")
+    # Flatten semi-transparent pixels so the shield stays visible on light/dark menu bars.
+    background = Image.new("RGBA", rgba.size, (255, 255, 255, 0))
+    flattened = Image.alpha_composite(background, rgba)
+    pixels = flattened.load()
+    width, height = flattened.size
+    for y in range(height):
+        for x in range(width):
+            r, g, b, a = pixels[x, y]
+            if a < 16:
+                continue
+            alpha = min(255, int(a * 1.35))
+            pixels[x, y] = (r, g, b, alpha)
+    icon = flattened.resize((size, size), Image.LANCZOS)
+    if state == "recording":
+        draw = ImageDraw.Draw(icon)
+        dot = max(4, size // 4)
+        pad = 1
+        draw.ellipse(
+            (size - dot - pad, size - dot - pad, size - pad, size - pad),
+            fill=STATE_COLORS["recording"],
+        )
+    return icon
+
+
 def make_tray_icon(state: str, size: int = 64) -> Image.Image:
+    if size <= 22:
+        return make_menu_bar_icon(state, size=size)
     img = load_logo_image(size=size)
     if state == "recording":
         draw = ImageDraw.Draw(img)

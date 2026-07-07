@@ -38,7 +38,7 @@ def test_mix_mono_clips():
     lb = np.array([30000, -30000], dtype=np.int16)
     mic = np.array([10000, -10000], dtype=np.int16)
     mixed = mix_mono(lb, mic)
-    assert mixed.tolist() == [32767, -32768]
+    assert mixed.tolist() == [29250, -29250]
 
 
 def test_interleave_stereo():

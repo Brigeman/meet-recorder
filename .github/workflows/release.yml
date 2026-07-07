@@ -21,32 +21,6 @@ jobs:
       - name: Run tests
         run: pytest -q
 
-  build-windows:
-    needs: test
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
-          pip install pyinstaller
-      - name: Build executables
-        run: pyinstaller build/meetrec.spec --noconfirm --log-level INFO
-      - name: List build output
-        run: dir dist
-      - name: Create archive
-        shell: pwsh
-        run: |
-          Compress-Archive -Path dist/WinRec* -DestinationPath "DesktopMeetingRecorder-${{ github.ref_name }}-win64.zip"
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: DesktopMeetingRecorder-${{ github.ref_name }}-win64.zip
-          generate_release_notes: true
-
   build-macos:
     needs: test
     runs-on: macos-latest
@@ -59,20 +33,31 @@ jobs:
         run: |
           pip install -r requirements.txt
           pip install pyinstaller
-      - name: Build ScreenCaptureKit helper
+      - name: Build macOS audio helpers
         run: bash meetrec/platform/macos/helper/build.sh
       - name: Build app bundle
         run: pyinstaller build/macrec.spec --noconfirm --log-level INFO
-      - name: Bundle system-audio helper
+      - name: Bundle macOS helpers
         run: |
-          cp meetrec/platform/macos/helper/MeetRecSystemAudio \
-            "dist/Desktop Meeting Recorder.app/Contents/MacOS/MeetRecSystemAudio"
-          chmod +x "dist/Desktop Meeting Recorder.app/Contents/MacOS/MeetRecSystemAudio"
+          MACOS="dist/Desktop Meeting Recorder.app/Contents/MacOS"
+          cp meetrec/platform/macos/helper/MeetRecSystemAudio "$MACOS/"
+          cp meetrec/platform/macos/helper/MeetRecVoiceMic "$MACOS/"
+          chmod +x "$MACOS/MeetRecSystemAudio" "$MACOS/MeetRecVoiceMic"
       - name: Create DMG with Applications shortcut
         run: bash build/create-macos-dmg.sh "DesktopMeetingRecorder-${{ github.ref_name }}-macos.dmg"
-      - name: Upload macOS release asset
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           files: DesktopMeetingRecorder-${{ github.ref_name }}-macos.dmg
-          generate_release_notes: false
+          generate_release_notes: true
+          body: |
+            ## macOS — установка
+
+            1. Скачайте `DesktopMeetingRecorder-*-macos.dmg` и откройте его.
+            2. Дважды кликните **`Install.command`** (или перетащите `.app` в **Applications**).
+            3. Если macOS блокирует запуск — см. **`Первый запуск.txt`** в окне DMG или [docs/macos-setup.md](https://github.com/Brigeman/meet-recorder/blob/main/docs/macos-setup.md).
+            4. Разрешите **Микрофон**, **Запись экрана** и **Универсальный доступ** при первом запуске.
+            5. Иконка появится в **строке меню** (в Dock приложения нет).
+
+            Windows-сборка в этом релизе не обновлялась — используйте последний [win64.zip](https://github.com/Brigeman/meet-recorder/releases) с Windows-артефактом.

@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import ipaddress
+import logging
 
 import psutil
+
+log = logging.getLogger(__name__)
 
 
 def probe_meeting_app_network(meeting_pids: set[int]) -> tuple[bool, int, int | None]:
@@ -14,23 +17,35 @@ def probe_meeting_app_network(meeting_pids: set[int]) -> tuple[bool, int, int | 
 
     conn_count = 0
     sample_pid: int | None = None
-    try:
-        for conn in psutil.net_connections(kind="inet"):
-            pid = getattr(conn, "pid", None)
-            if not pid or pid not in meeting_pids:
+    best_pid: int | None = None
+    best_pid_count = 0
+
+    for pid in meeting_pids:
+        try:
+            pid_count = 0
+            for conn in psutil.Process(pid).net_connections(kind="inet"):
+                if not _is_public_remote(conn):
+                    continue
+                if conn.type == 2:
+                    pid_count += 1
+                elif (conn.status or "").upper() == "ESTABLISHED":
+                    pid_count += 1
+            if pid_count <= 0:
                 continue
-            if not _is_public_remote(conn):
-                continue
-            if conn.type == 2:
-                conn_count += 1
-            elif (conn.status or "").upper() == "ESTABLISHED":
-                conn_count += 1
+            conn_count += pid_count
             if sample_pid is None:
                 sample_pid = pid
-    except (psutil.AccessDenied, OSError):
-        return False, 0, None
+            if pid_count > best_pid_count:
+                best_pid_count = pid_count
+                best_pid = pid
+        except (psutil.NoSuchProcess, psutil.AccessDenied, OSError) as exc:
+            log.debug("meeting net probe skipped pid=%s err=%s", pid, exc)
+            continue
 
-    return conn_count >= 3, conn_count, sample_pid
+    active_pid = best_pid or sample_pid
+    # Require strong per-PID signal; total count alone is too noisy for idle Teams/Zoom.
+    active = best_pid_count >= 6
+    return active, conn_count, active_pid
 
 
 def _is_public_remote(conn) -> bool:

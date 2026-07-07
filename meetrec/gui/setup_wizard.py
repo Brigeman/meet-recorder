@@ -121,12 +121,20 @@ class SetupWizard(ctk.CTkToplevel):
         save_config(self._cfg)
         self._completed = True
         self._on_complete(self._cfg)
+        try:
+            self.grab_release()
+        except Exception:
+            pass
         self.destroy()
 
     def _skip(self):
         self._cfg["calls_setup_skipped"] = True
         save_config(self._cfg)
         self._on_complete(self._cfg)
+        try:
+            self.grab_release()
+        except Exception:
+            pass
         self.destroy()
 
     @property

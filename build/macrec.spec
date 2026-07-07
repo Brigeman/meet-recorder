@@ -23,6 +23,9 @@ a = Analysis(
     ],
     hiddenimports=meetrec_hidden
     + [
+        "meetrec.gui.native_panel_macos",
+        "meetrec.gui.native_prompt_macos",
+        "meetrec.gui.panel_factory",
         "customtkinter",
         "PIL",
         "PIL._tkinter_finder",
@@ -61,7 +64,7 @@ exe = EXE(
     upx=False,
     console=False,
     disable_windowed_traceback=False,
-    argv_emulation=True,
+    argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,

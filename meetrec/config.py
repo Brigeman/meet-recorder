@@ -37,7 +37,17 @@ DEFAULTS = {
     "enable_experimental_uia": False,
     "recordings_dir": DEFAULT_RECORDINGS_DIR,
     "audio_format": "wav",
-    "dual_track_recording": False,
+    "dual_track_recording": True,
+    "speaker_separation": True,
+    "echo_cancellation": True,
+    # macOS only: capture the mic through Apple's VoiceProcessingIO audio unit so echo
+    # is cancelled natively at the source (recovers double-talk, removes speaker echo
+    # before it is ever recorded). Off by default — experimental: a parallel VPIO
+    # process can conflict with Teams/Zoom owning the mic and disrupt the live call.
+    # When true AND the native helper passes safety checks, capture.py records the
+    # echo-cancelled mic at the source. Falls back to the raw mic + export-time
+    # hard-gate when the helper is missing, unsafe, or fails to initialise.
+    "mic_os_aec": False,
     "filename_prefix": "meeting",
     "notifications": True,
     "start_with_windows": True,

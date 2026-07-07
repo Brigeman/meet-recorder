@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import queue
+import re
 import subprocess
 import sys
 import threading
@@ -18,7 +19,14 @@ from typing import Any
 import imageio_ffmpeg
 import numpy as np
 
-from meetrec.recorder.audio_mix import interleave_stereo, mix_mono, peak_level, resample, to_mono
+from meetrec.recorder.audio_mix import (
+    BleedCancelState,
+    interleave_stereo,
+    mix_mono,
+    peak_level,
+    resample,
+    to_mono,
+)
 
 log = logging.getLogger(__name__)
 
@@ -27,6 +35,12 @@ QUEUE_MAX = 200
 MAX_FILENAME = 180
 DEVICE_CHECK_INTERVAL = 1.0
 FILE_RATE = 48000
+# VoiceProcessingIO grabs the system default input. Aggregate/virtual devices with
+# many channels (e.g. ch=9) and parallel use while Teams/Zoom owns the mic both
+# yield silence and can disrupt the live call — refuse those setups.
+NATIVE_MIC_MAX_CHANNELS = 2
+NATIVE_MIC_INIT_TIMEOUT_S = 3.0
+NATIVE_MIC_MIN_PEAK = 1
 
 _FFMPEG_ARGS = {
     "mp3": ["-b:a", "192k"],
@@ -40,6 +54,16 @@ _FFMPEG_ARGS = {
 
 
 @dataclass
+class _NativeMicHandshake:
+    ready: threading.Event = field(default_factory=threading.Event)
+    channels: int = 0
+    sample_rate: int = 0
+    frames_seen: int = 0
+    max_peak: int = 0
+    lock: threading.Lock = field(default_factory=threading.Lock)
+
+
+@dataclass
 class StreamBundle:
     helper_proc: subprocess.Popen | None
     mic_stream: Any | None
@@ -47,25 +71,40 @@ class StreamBundle:
     mic_ch: int
     mic_name: str | None
     system_available: bool
+    mic_helper_proc: subprocess.Popen | None = None
+    mic_native: bool = False
     lb_queue: queue.Queue = field(default_factory=lambda: queue.Queue(maxsize=QUEUE_MAX))
     mic_queue: queue.Queue = field(default_factory=lambda: queue.Queue(maxsize=QUEUE_MAX))
     helper_error: threading.Event = field(default_factory=threading.Event)
     mic_error: threading.Event = field(default_factory=threading.Event)
+    mic_first_frame: threading.Event = field(default_factory=threading.Event)
 
 
-def _helper_path() -> Path | None:
+def _binary_candidates(name: str) -> list[Path]:
     candidates: list[Path] = []
     if getattr(sys, "frozen", False):
         exe_dir = Path(sys.executable).resolve().parent
         candidates.extend(
             [
-                exe_dir / "MeetRecSystemAudio",
-                exe_dir.parent / "Resources" / "MeetRecSystemAudio",
-                exe_dir.parent / "MacOS" / "MeetRecSystemAudio",
+                exe_dir / name,
+                exe_dir.parent / "Resources" / name,
+                exe_dir.parent / "MacOS" / name,
             ]
         )
-    candidates.append(Path(__file__).resolve().parent / "helper" / "MeetRecSystemAudio")
-    for candidate in candidates:
+    candidates.append(Path(__file__).resolve().parent / "helper" / name)
+    return candidates
+
+
+def _helper_path() -> Path | None:
+    for candidate in _binary_candidates("MeetRecSystemAudio"):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _mic_helper_path() -> Path | None:
+    """Path to the VoiceProcessingIO mic helper binary, if it has been built."""
+    for candidate in _binary_candidates("MeetRecVoiceMic"):
         if candidate.is_file():
             return candidate
     return None
@@ -82,6 +121,7 @@ class AudioCapture:
         self._peak = 0.0
         self._peak_lock = threading.Lock()
         self._on_peak = None
+        self._bleed_state = BleedCancelState(sample_rate=FILE_RATE)
 
     def update_settings(self, settings: dict) -> None:
         self._settings = settings
@@ -135,18 +175,22 @@ class AudioCapture:
             "meeting_hint": (meeting_hint or "").strip() or None,
             "user_confirmed": True,
             "audio_file": self._output_path,
-            "dual_track": bool(self._settings.get("dual_track_recording", False)),
+            "dual_track": self._use_speaker_separation(),
+            "speaker_separation": self._use_speaker_separation(),
+            "mic_os_aec_requested": self._want_native_mic(),
+            "mic_os_aec_active": False,
             "devices_used": [],
             "device_switches": [],
         }
         self._stop_event.clear()
         self._file_closed.clear()
+        self._bleed_state = BleedCancelState(sample_rate=FILE_RATE)
         self._thread = threading.Thread(target=self._record_loop, daemon=True)
         self._thread.start()
         log.info("Recording started -> %s", self._output_path)
         return self._output_path
 
-    def stop(self) -> dict:
+    def stop(self, *, defer_export: bool = False) -> dict:
         if not self.is_recording:
             return self.metadata
         self._stop_event.set()
@@ -154,13 +198,29 @@ class AudioCapture:
         self._thread.join(timeout=5)
         self._thread = None
         self._metadata["ended_at"] = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-        self._write_metadata_json()
+        if not defer_export:
+            self.finalize_export()
+        else:
+            self._write_metadata_json()
+        log.info("Recording stopped -> %s", self._output_path)
+        return self.metadata
 
+    def finalize_export(self) -> None:
+        """Build speaker tracks / mixed primary and optional format conversion."""
+        wav_for_export = self._output_path
+        if wav_for_export and self._use_speaker_separation():
+            from meetrec.recorder.speaker_tracks import finalize_recording_metadata
+
+            finalize_recording_metadata(
+                self._metadata,
+                wav_for_export,
+                enabled=True,
+            )
+        self._write_metadata_json()
         fmt = self._settings.get("audio_format", "wav")
         if fmt != "wav":
             self._convert(fmt)
-        log.info("Recording stopped -> %s", self._output_path)
-        return self.metadata
+            self._write_metadata_json()
 
     def _write_metadata_json(self) -> None:
         if not self._output_path:
@@ -240,6 +300,34 @@ class AudioCapture:
         else:
             log.warning("MeetRecSystemAudio helper not found; recording microphone only")
 
+        # Prefer the native VoiceProcessingIO mic (OS-grade AEC at capture time). If it
+        # is disabled, unavailable, or fails to initialise, fall back to the plain
+        # sounddevice mic + export-time hard-gate so nothing ever breaks.
+        mic_first_frame = threading.Event()
+        mic_helper_proc = None
+        mic_native = False
+        if self._want_native_mic():
+            mic_helper_proc = self._start_native_mic(mic_queue, mic_error, mic_first_frame)
+            mic_native = mic_helper_proc is not None
+
+        if mic_native:
+            log.info("microphone: native VoiceProcessingIO AEC active")
+            return StreamBundle(
+                helper_proc=helper_proc,
+                mic_stream=None,
+                mic_rate=FILE_RATE,
+                mic_ch=1,
+                mic_name="VoiceProcessingIO (native AEC)",
+                system_available=system_available,
+                mic_helper_proc=mic_helper_proc,
+                mic_native=True,
+                lb_queue=lb_queue,
+                mic_queue=mic_queue,
+                helper_error=helper_error,
+                mic_error=mic_error,
+                mic_first_frame=mic_first_frame,
+            )
+
         mic_info = sd.query_devices(kind="input")
         mic_rate = int(mic_info.get("default_samplerate", FILE_RATE))
         mic_ch = max(1, int(mic_info.get("max_input_channels", 1)))
@@ -269,11 +357,176 @@ class AudioCapture:
             mic_ch=mic_ch,
             mic_name=mic_name,
             system_available=system_available,
+            mic_helper_proc=None,
+            mic_native=False,
             lb_queue=lb_queue,
             mic_queue=mic_queue,
             helper_error=helper_error,
             mic_error=mic_error,
+            mic_first_frame=mic_first_frame,
         )
+
+    def _want_native_mic(self) -> bool:
+        return bool(self._settings.get("mic_os_aec", False))
+
+    def _start_native_mic(
+        self,
+        mic_queue: queue.Queue,
+        mic_error: threading.Event,
+        first_frame: threading.Event,
+    ) -> subprocess.Popen | None:
+        """Spawn the VoiceProcessingIO mic helper; return the proc only if it starts
+        streaming audio quickly, otherwise clean up and return None (caller falls back)."""
+        helper = _mic_helper_path()
+        if helper is None:
+            log.info("native mic helper not built; using sounddevice mic")
+            return None
+        try:
+            proc = subprocess.Popen(
+                [str(helper)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=0,
+            )
+        except OSError as exc:
+            log.warning("native mic helper failed to start: %s", exc)
+            return None
+
+        handshake = _NativeMicHandshake()
+        threading.Thread(
+            target=self._drain_mic_helper_stdout,
+            args=(proc, mic_queue, mic_error, first_frame, handshake),
+            daemon=True,
+        ).start()
+        threading.Thread(
+            target=self._drain_mic_helper_stderr,
+            args=(proc, handshake),
+            daemon=True,
+        ).start()
+
+        deadline = time.monotonic() + NATIVE_MIC_INIT_TIMEOUT_S
+        while time.monotonic() < deadline:
+            if proc.poll() is not None:
+                break
+            with handshake.lock:
+                channels = handshake.channels
+                frames_seen = handshake.frames_seen
+                max_peak = handshake.max_peak
+            if channels > NATIVE_MIC_MAX_CHANNELS:
+                log.warning(
+                    "native mic: refusing aggregate/multi-channel input (ch=%s); "
+                    "falling back to sounddevice mic",
+                    channels,
+                )
+                self._terminate_mic_helper(proc)
+                return None
+            if frames_seen >= 5:
+                break
+            time.sleep(0.05)
+
+        if proc.poll() is not None:
+            log.warning(
+                "native mic helper exited during init (exit=%s); falling back to sounddevice mic",
+                proc.poll(),
+            )
+            self._terminate_mic_helper(proc)
+            return None
+
+        with handshake.lock:
+            channels = handshake.channels
+            max_peak = handshake.max_peak
+            frames_seen = handshake.frames_seen
+
+        if channels > NATIVE_MIC_MAX_CHANNELS:
+            log.warning(
+                "native mic: refusing aggregate/multi-channel input (ch=%s); "
+                "falling back to sounddevice mic",
+                channels,
+            )
+            self._terminate_mic_helper(proc)
+            return None
+
+        if frames_seen == 0:
+            log.warning(
+                "native mic helper produced no audio (exit=%s); falling back to sounddevice mic",
+                proc.poll(),
+            )
+            self._terminate_mic_helper(proc)
+            return None
+
+        if max_peak < NATIVE_MIC_MIN_PEAK:
+            log.warning(
+                "native mic helper streams silence (peak=%s); falling back to sounddevice mic",
+                max_peak,
+            )
+            self._terminate_mic_helper(proc)
+            return None
+
+        return proc
+
+    @staticmethod
+    def _terminate_mic_helper(proc: subprocess.Popen) -> None:
+        try:
+            proc.terminate()
+            proc.wait(timeout=2)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+
+    def _drain_mic_helper_stdout(
+        self,
+        proc: subprocess.Popen,
+        mic_queue: queue.Queue,
+        mic_error: threading.Event,
+        first_frame: threading.Event,
+        handshake: _NativeMicHandshake,
+    ) -> None:
+        assert proc.stdout is not None
+        frame_bytes = CHUNK * 2  # mono int16
+        buf = bytearray()
+        try:
+            while not self._stop_event.is_set():
+                data = proc.stdout.read(frame_bytes)
+                if not data:
+                    break
+                buf.extend(data)
+                while len(buf) >= frame_bytes:
+                    frame = bytes(buf[:frame_bytes])
+                    del buf[:frame_bytes]
+                    samples = np.frombuffer(frame, dtype=np.int16)
+                    peak = int(np.max(np.abs(samples))) if samples.size else 0
+                    with handshake.lock:
+                        handshake.frames_seen += 1
+                        handshake.max_peak = max(handshake.max_peak, peak)
+                    first_frame.set()
+                    try:
+                        mic_queue.put_nowait(samples)
+                    except queue.Full:
+                        pass
+        except Exception as exc:
+            log.warning("native mic stdout drain failed: %s", exc)
+            mic_error.set()
+
+    def _drain_mic_helper_stderr(
+        self, proc: subprocess.Popen, handshake: _NativeMicHandshake
+    ) -> None:
+        if not proc.stderr:
+            return
+        for line in proc.stderr:
+            text = line.decode("utf-8", errors="replace").strip()
+            if text:
+                log.info("native mic helper: %s", text)
+            if text.startswith("READY voiceio"):
+                rate_match = re.search(r"rate=(\d+)", text)
+                ch_match = re.search(r"ch=(\d+)", text)
+                with handshake.lock:
+                    if rate_match:
+                        handshake.sample_rate = int(rate_match.group(1))
+                    if ch_match:
+                        handshake.channels = int(ch_match.group(1))
+                    handshake.ready.set()
 
     def _drain_helper_stdout(
         self,
@@ -318,24 +571,33 @@ class AudioCapture:
                 bundle.mic_stream.close()
             except Exception:
                 pass
-        if bundle.helper_proc is not None:
+        for proc in (bundle.helper_proc, bundle.mic_helper_proc):
+            if proc is None:
+                continue
             try:
-                bundle.helper_proc.terminate()
-                bundle.helper_proc.wait(timeout=2)
+                proc.terminate()
+                proc.wait(timeout=2)
             except Exception:
                 try:
-                    bundle.helper_proc.kill()
+                    proc.kill()
                 except Exception:
                     pass
 
     def _record_device(self, bundle: StreamBundle) -> None:
+        self._metadata["mic_os_aec_active"] = bundle.mic_native
         self._metadata["devices_used"].append(
             {
                 "loopback": "ScreenCaptureKit" if bundle.system_available else None,
                 "microphone": bundle.mic_name,
+                "mic_os_aec": bundle.mic_native,
                 "at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
             }
         )
+
+    def _use_speaker_separation(self) -> bool:
+        if self._settings.get("speaker_separation", True):
+            return True
+        return bool(self._settings.get("dual_track_recording", False))
 
     def _process_chunk(
         self,
@@ -363,17 +625,30 @@ class AudioCapture:
         else:
             mic_arr = np.zeros(target_len, dtype=np.int16)
 
+        # Native VoiceProcessingIO already cancelled echo at the source — never run our
+        # (useless-on-real-echo) subtraction on top of it.
+        echo_on = self._settings.get("echo_cancellation", True) and not bundle.mic_native
         if dual_track:
+            # R channel is the (native-AEC or raw) mic; export decides how to treat it.
             out = interleave_stereo(lb_arr, mic_arr)
         else:
-            out = mix_mono(lb_arr, mic_arr)
+            gain, lag, corr = (0.0, 0, 0.0)
+            if echo_on:
+                gain, lag, corr = self._bleed_state.update(lb_arr, mic_arr)
+            out = mix_mono(
+                lb_arr,
+                mic_arr,
+                bleed_gain=gain,
+                lag_samples=lag,
+                bleed_corr=corr,
+            )
         self._update_peak(out)
         return out
 
     def _record_loop(self) -> None:
         wf = None
         bundle: StreamBundle | None = None
-        dual_track = bool(self._settings.get("dual_track_recording", False))
+        dual_track = self._use_speaker_separation()
 
         try:
             bundle = self._open_streams()

@@ -1,9 +1,10 @@
 [project]
 name = "desktop-meeting-recorder"
-version = "1.0.3"
+version = "1.1.0"
 description = "Desktop Meeting Recorder — prompt-before-record for Windows and macOS calls"
 readme = "README.md"
 requires-python = ">=3.10"
+authors = [{ name = "o2consult", email = "o2consulting2025@gmail.com" }]
 dependencies = []
 
 [tool.pytest.ini_options]

@@ -208,6 +208,7 @@ class WinRecApp(ctk.CTk):
     def _resolve_audio_path(self, metadata: dict, file_path: str | None) -> str | None:
         candidates: list[str] = []
         for value in (
+            (metadata or {}).get("mixed_file"),
             (metadata or {}).get("audio_file"),
             (metadata or {}).get("wav_backup"),
             file_path,
@@ -227,7 +228,7 @@ class WinRecApp(ctk.CTk):
 
                     with open(candidate, encoding="utf-8") as f:
                         meta = json.load(f)
-                    audio = meta.get("audio_file") or meta.get("wav_backup")
+                    audio = meta.get("mixed_file") or meta.get("audio_file") or meta.get("wav_backup")
                     if audio and os.path.isfile(audio) and os.path.getsize(audio) > 0:
                         return audio
                 except (OSError, json.JSONDecodeError, TypeError):

@@ -108,8 +108,12 @@ class RecorderService:
     def _stop(self) -> None:
         if not self._capture.is_recording:
             return
+        session_id = self._session_id
+        export_pending = bool(
+            self._capture.current_file and self._capture.metadata.get("speaker_separation")
+        )
         try:
-            meta = self._capture.stop()
+            meta = self._capture.stop(defer_export=export_pending)
         except Exception as e:
             log.error("capture stop failed: %s", e)
             meta = self._capture.metadata
@@ -117,7 +121,7 @@ class RecorderService:
             write_jsonl_line(
                 {
                     "type": "recording_failed",
-                    "session_id": self._session_id,
+                    "session_id": session_id,
                     "message": str(e),
                     "file_path": audio_file,
                     "metadata": meta,
@@ -131,28 +135,67 @@ class RecorderService:
             write_jsonl_line(
                 {
                     "type": "recording_stopped",
-                    "session_id": self._session_id,
+                    "session_id": session_id,
                     "file_path": audio_file,
                     "metadata": meta,
+                    "export_pending": export_pending,
                     "timestamp": time.time(),
                 }
             )
-            log_event("recording_stopped", session_id=self._session_id)
+            log_event("recording_stopped", session_id=session_id)
         except Exception as e:
             log.error("recording_stopped event failed: %s", e)
             write_jsonl_line(
                 {
                     "type": "recording_stopped",
-                    "session_id": self._session_id,
+                    "session_id": session_id,
                     "file_path": audio_file,
                     "metadata": {},
                     "partial": True,
                     "timestamp": time.time(),
                 }
             )
+            return
+
+        if export_pending and audio_file:
+            threading.Thread(
+                target=self._finalize_export,
+                args=(session_id,),
+                daemon=True,
+                name="recorder-export",
+            ).start()
+
+    def _finalize_export(self, session_id: str | None) -> None:
+        try:
+            self._capture.finalize_export()
+            meta = self._capture.metadata
+            write_jsonl_line(
+                {
+                    "type": "recording_exported",
+                    "session_id": session_id,
+                    "file_path": meta.get("audio_file"),
+                    "metadata": meta,
+                    "timestamp": time.time(),
+                }
+            )
+            log_event("recording_exported", session_id=session_id)
+        except Exception as e:
+            log.error("background export failed: %s", e)
+            write_jsonl_line(
+                {
+                    "type": "recording_export_failed",
+                    "session_id": session_id,
+                    "message": str(e),
+                    "metadata": self._capture.metadata,
+                    "timestamp": time.time(),
+                }
+            )
 
 
 def main() -> None:
+    from meetrec.ipc.worker_guard import start_parent_watchdog
+
+    start_parent_watchdog()
     try:
         RecorderService().run()
     except KeyboardInterrupt:

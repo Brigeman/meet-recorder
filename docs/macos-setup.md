@@ -1,44 +1,94 @@
-# macOS setup (without Developer ID)
+# Установка и запуск на macOS
 
-One-time setup on each Mac for ad-hoc / unsigned builds distributed outside the App Store.
+Инструкция для ad-hoc / unsigned сборок (без Apple Developer ID), распространяемых через GitHub Releases.
 
-## Install
+## Скачать
 
-1. Copy `Desktop Meeting Recorder.app` to `/Applications`.
-2. Remove Gatekeeper quarantine (fixes `zsh: killed` on `Install.command` and blocked launch):
+1. Откройте [Releases](https://github.com/Brigeman/meet-recorder/releases).
+2. Скачайте **`DesktopMeetingRecorder-vX.Y.Z-macos.dmg`** для нужной версии.
+
+## Установка
+
+Откройте DMG. В окне будут:
+
+- `Desktop Meeting Recorder.app`
+- ярлык **Applications →**
+- **`Install.command`**
+- **`Первый запуск.txt`**
+
+### Способ 1 — Install.command (рекомендуется)
+
+1. Дважды кликните **`Install.command`**.
+2. Если macOS спросит про неизвестный скрипт — **Открыть**.
+3. Скрипт скопирует приложение в `/Applications` и запустит его через Finder.
+
+### Способ 2 — вручную
+
+1. Перетащите **`Desktop Meeting Recorder.app`** в **Applications**.
+2. Снимите карантин Gatekeeper (один раз после скачивания):
 
 ```bash
 xattr -dr com.apple.quarantine "/Applications/Desktop Meeting Recorder.app"
 ```
 
-3. Launch the app from `/Applications` (not from the DMG mount).
+3. Запустите:
 
-## Privacy permissions
+```bash
+open "/Applications/Desktop Meeting Recorder.app"
+```
 
-Open **System Settings → Privacy & Security** and grant:
+### Способ 3 — macOS 15+ (Sequoia), если блокирует запуск
 
-| Permission | Why |
-|------------|-----|
-| **Screen Recording** | Window titles for browser meetings (Google Meet, etc.) and in-call title hints |
-| **Accessibility** | Foreground app / window detection |
-| **Microphone** | Confirm the prompt on first recording attempt |
+1. Дважды кликните приложение → появится предупреждение → **Готово**.
+2. **Системные настройки → Конфиденциальность и безопасность**.
+3. Внизу — **«Все равно открыть»** для Desktop Meeting Recorder.
+4. Подтвердите паролем или Touch ID.
 
-The app runs as a menu-bar utility (no Dock icon). Look for the recorder icon in the top menu bar.
+> **Важно:** не запускайте `.app` прямо из окна DMG — macOS 15/16 может блокировать или крашить приложение с образа. Всегда копируйте в **Applications** сначала.
 
-## Autostart
+> Не запускайте `Contents/MacOS/MeetRec` из Terminal для обычного использования — окно Terminal останется открытым на всё время работы приложения.
 
-A Launch Agent (`ai.o2consult.meetrec`) is registered when you enable autostart in Settings. After permissions are granted, the app can start at login.
+## Первый запуск
 
-## After each rebuild / update
+- Иконка появится в **строке меню** (menubar). В Dock приложения **нет** — это нормально.
+- При первой записи разрешите **Микрофон**.
+- Для системного звука и детекции браузерных встреч нужны **Запись экрана** и **Универсальный доступ** (Accessibility).
 
-Ad-hoc builds get a new code signature (cdhash). macOS treats each build as a new app for TCC (privacy) purposes. **Repeat the steps above** after installing a new version:
+| Разрешение | Зачем |
+|------------|-------|
+| **Запись экрана** (Screen Recording) | Заголовки окон браузера (Google Meet и т.д.) |
+| **Универсальный доступ** (Accessibility) | Активное приложение / окно |
+| **Микрофон** | Запись вашей стороны разговора |
 
-- Remove quarantine with `xattr`
-- Re-grant Screen Recording, Accessibility, and Microphone if prompts do not appear or detection stops working
+Откройте **Системные настройки → Конфиденциальность и безопасность** и включите все три для **Desktop Meeting Recorder**.
 
-Developer ID signing and notarization (not covered here) reduce this friction for wide distribution.
+## Автозапуск
 
-## Logs
+В **Settings** приложения можно включить автозапуск. Регистрируется Launch Agent `ai.o2consult.meetrec`.
+
+## После обновления
+
+Ad-hoc сборки каждый раз получают новую подпись. macOS может снова запросить разрешения:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Desktop Meeting Recorder.app"
+```
+
+Проверьте **Запись экрана**, **Универсальный доступ** и **Микрофон** в настройках, если детекция перестала работать.
+
+Подпись **Developer ID** ($99/год) сохраняет права между пересборками — для внутреннего использования достаточно ad-hoc + `xattr`.
+
+## Проверка детекции
+
+Во время реального звонка (Teams, Zoom, Meet в браузере):
+
+```bash
+grep call_candidate ~/Documents/Desktop\ Meeting\ Recordings/logs/meetrec-detector-*.log | tail -5
+```
+
+Должны появиться строки `call_candidate` со score ≥ 70.
+
+## Логи
 
 ```text
 ~/Documents/Desktop Meeting Recordings/logs/
@@ -47,10 +97,22 @@ Developer ID signing and notarization (not covered here) reduce this friction fo
   meetrec-recorder-YYYY-MM-DD.log
 ```
 
-Successful startup shows `app_start` in the GUI log and `detector_started` in the detector log.
+Успешный старт: `app_start` в GUI-логе, `detector_started` в detector-логе.
+
+## Разработка из исходников
+
+```bash
+./start.sh
+# или
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+bash meetrec/platform/macos/helper/build.sh
+python -m meetrec
+```
 
 ## Troubleshooting
 
-- **No menu bar icon**: kill stale instances (`pkill -f "Desktop Meeting Recorder"`), remove lock file at `~/Library/Application Support/Desktop Meeting Recorder/meetrec.lock`, reinstall and re-grant permissions.
-- **Desktop Teams/Zoom not detected**: mic + system audio during the call is usually enough; Screen Recording is optional for desktop apps.
-- **Browser Meet not detected**: enable Screen Recording so window titles are visible to the detector.
+- **Нет иконки в menubar:** `pkill -f "Desktop Meeting Recorder"`, удалите `~/Library/Application Support/Desktop Meeting Recorder/meetrec.lock`, переустановите и выдайте права заново.
+- **Install.command «убит» (killed):** сначала снимите quarantine с DMG: `xattr -dr com.apple.quarantine ~/Downloads/DesktopMeetingRecorder-*.dmg`, затем смонтируйте снова.
+- **Desktop Teams/Zoom не детектится:** обычно достаточно микрофона + системного звука во время звонка.
+- **Meet в браузере не детектится:** включите **Запись экрана**.
