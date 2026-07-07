@@ -640,8 +640,12 @@ def run_gui() -> int:
     if not acquire_single_instance():
         log_event("single_instance_duplicate")
         log.warning("Another instance is already running")
-        show_message("Desktop Meeting Recorder уже запущен.", APP_NAME, 0x40)
-        return 1
+        # Exit 0: a duplicate launch is a benign no-op, not a failure. Returning
+        # non-zero makes the macOS LaunchAgent (KeepAlive: SuccessfulExit=False)
+        # relaunch us forever, spamming the "already running" prompt.
+        if sys.platform == "win32":
+            show_message("Desktop Meeting Recorder уже запущен.", APP_NAME, 0x40)
+        return 0
     log_event("single_instance_acquired")
     reap_stale_workers()
     try:
