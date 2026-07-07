@@ -9,12 +9,22 @@ from meetrec.calls.pairing import PairingError, apply_pairing_to_config
 from meetrec.gui.settings import SettingsWindow
 
 
+def _load_winrec_app():
+    """Import WinRecApp, skipping on headless envs where the tray backend
+    (pystray → Xlib) cannot open a display at import time (e.g. Linux CI)."""
+    try:
+        from meetrec.gui.app import WinRecApp
+    except Exception as exc:  # pragma: no cover - platform/display dependent
+        pytest.skip(f"GUI app import unavailable: {exc}")
+    return WinRecApp
+
+
 def test_settings_window_accepts_pairing_callback():
     assert "on_pairing_complete" in SettingsWindow.__init__.__code__.co_varnames
 
 
 def test_reset_pairing_on_darwin_skips_setup_wizard():
-    from meetrec.gui.app import WinRecApp
+    WinRecApp = _load_winrec_app()
 
     app = MagicMock()
     app._cfg = {
@@ -37,7 +47,7 @@ def test_reset_pairing_on_darwin_skips_setup_wizard():
 
 
 def test_reset_pairing_on_windows_opens_setup_wizard():
-    from meetrec.gui.app import WinRecApp
+    WinRecApp = _load_winrec_app()
 
     app = MagicMock()
     app._cfg = {
