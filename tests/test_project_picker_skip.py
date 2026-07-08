@@ -15,22 +15,22 @@ class _StubApp:
         self._session_project_id = None
 
 
-def _load_winrec_app():
+def _load_app_module():
     """Skip on headless Linux CI where pystray/Xlib cannot open a display."""
     try:
-        from meetrec.gui.app import WinRecApp
+        from meetrec.gui import app as app_mod
     except Exception as exc:  # pragma: no cover - platform/display dependent
         pytest.skip(f"GUI app import unavailable: {exc}")
-    return WinRecApp
+    return app_mod
 
 
 def _bind_show_project_picker(stub: _StubApp):
-    WinRecApp = _load_winrec_app()
-    return WinRecApp._show_project_picker.__get__(stub, WinRecApp)
+    app_mod = _load_app_module()
+    return app_mod.WinRecApp._show_project_picker.__get__(stub, app_mod.WinRecApp)
 
 
 def test_skips_dialog_when_default_project_configured(monkeypatch):
-    from meetrec.gui import app as app_mod
+    app_mod = _load_app_module()
 
     opened: list[bool] = []
     monkeypatch.setattr(
@@ -56,7 +56,7 @@ def test_skips_dialog_when_default_project_configured(monkeypatch):
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS menu-bar UI path")
 def test_skips_dialog_on_macos_even_without_default(monkeypatch):
-    from meetrec.gui import app as app_mod
+    app_mod = _load_app_module()
 
     opened: list[bool] = []
     monkeypatch.setattr(
@@ -84,7 +84,7 @@ def test_shows_dialog_on_windows_when_no_default(monkeypatch):
     if sys.platform == "darwin":
         pytest.skip("Windows-only CTk picker path")
 
-    from meetrec.gui import app as app_mod
+    app_mod = _load_app_module()
 
     opened: list[bool] = []
     monkeypatch.setattr(
