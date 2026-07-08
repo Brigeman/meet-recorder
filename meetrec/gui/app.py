@@ -466,6 +466,20 @@ class WinRecApp(ctk.CTk):
             on_confirm(default_project_id(self._cfg))
             return
 
+        preset = default_project_id(self._cfg)
+        # CTk Toplevel is invisible on macOS menu-bar apps (withdrawn Tk root, no Dock).
+        # Skip the dialog when a default project exists, or always on macOS (record
+        # without project if none configured — assign later in Calls web UI).
+        if preset or sys.platform == "darwin":
+            self._session_project_id = preset
+            log_event(
+                "project_picker_skipped",
+                reason="default_project" if preset else "macos_no_dialog",
+                project_id=preset,
+            )
+            on_confirm(preset)
+            return
+
         def _confirmed(project_id: str | None):
             self._session_project_id = project_id
             on_confirm(project_id)
