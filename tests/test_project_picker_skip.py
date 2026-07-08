@@ -15,9 +15,17 @@ class _StubApp:
         self._session_project_id = None
 
 
-def _bind_show_project_picker(stub: _StubApp):
-    from meetrec.gui.app import WinRecApp
+def _load_winrec_app():
+    """Skip on headless Linux CI where pystray/Xlib cannot open a display."""
+    try:
+        from meetrec.gui.app import WinRecApp
+    except Exception as exc:  # pragma: no cover - platform/display dependent
+        pytest.skip(f"GUI app import unavailable: {exc}")
+    return WinRecApp
 
+
+def _bind_show_project_picker(stub: _StubApp):
+    WinRecApp = _load_winrec_app()
     return WinRecApp._show_project_picker.__get__(stub, WinRecApp)
 
 
