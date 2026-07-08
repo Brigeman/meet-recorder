@@ -50,13 +50,14 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
+# onedir layout: EXE holds only the bootstrap; COLLECT gathers binaries/data
+# into Contents/MacOS/. Avoids the onefile per-launch unpack into a temp _MEI
+# dir (and the loader+child two-process split) that caused startup races.
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
     [],
+    exclude_binaries=True,
     name="MeetRec",
     debug=False,
     bootloader_ignore_signals=False,
@@ -70,8 +71,19 @@ exe = EXE(
     entitlements_file=None,
 )
 
-app = BUNDLE(
+coll = COLLECT(
     exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=False,
+    upx_exclude=[],
+    name="MeetRec",
+)
+
+app = BUNDLE(
+    coll,
     name="Desktop Meeting Recorder.app",
     icon=str(root / "meetrec" / "resources" / "logo.png"),
     bundle_identifier="ai.o2consult.meetrec",
